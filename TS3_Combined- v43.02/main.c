@@ -19,7 +19,7 @@
 
 #define MASTER 0
 #define SLAVE  1
-#define THIS_UNIT MASTER
+#define THIS_UNIT SLAVE
 
 /*
        /////////////////////////////////////////////////////////////////////////////////////////////
@@ -59,8 +59,9 @@
 ////////// PROGRAM PARAMETERS (may vary for each unit)
 
        // REMEMBER TO CHECK THE FTP LOG-IN CREDENTIALS IN THE FOLLOWING TWO LINES!!!!
-#define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
-#define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
+       //
+       #define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
+      /#define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
 
 
 #define USER_PASSWORD "ABCDEFGH"  // 8 character password needed for program or parameter downloads.  Recompile with a different password.
@@ -71,12 +72,12 @@
 
 // The following is only necessary for compiling a SMART SENSOR slave
        // SMART SENSOR IDENTIFICATION
-#define NEST_ID "123456.000,060914,M-AA0001"
+#define NEST_ID "123456.000,060914,S-AA0004"
        // The last 6 digits is a unique serial number for each smart sensor.
        // Update the last 6 digits before compiling for each new device.
        // The rest of the data will be updated during each new registration with a master
        // What you see here is just an example of what it could look like
-#define SERIAL_NUMBER "M-AA0001"   // Unique serial number for each device.  Update before compiling for a new device
+#define SERIAL_NUMBER "S-AA0004"   // Unique serial number for each device.  Update before compiling for a new device
 #define SERIAL_ID_LEN   8          // length of serial number string (don't change without changing all the places this is used)
        // PHASE THREE SERIAL NUMBER TEMPLATES
        // M-AA####  -- Master device
@@ -133,7 +134,8 @@
    15(S)   INT2        4.0     n/a     n/a     n/a     IN                      Interrupt 2 from ADXL
    16(M)   LED2        4.1     OUT     LED ON  LED OFF OUT     LED ON  LED OFF Sensor communications indicator red LED (quick blink at the start of every discussion)
    16(S)   INT1        4.1     n/a     n/a     n/a     IN                      Interrupt 1 from ADXL
-   17(M)   U-OUT       2.5     OUT-LO  ---     Drain   UCA1TXD DATA    DATA    UART to Phone, UCA1TXD
+   17(M)   U-OUT       2.5     OUT-LO  ---     Drain
+     UCA1TXD DATA    DATA    UART to Phone, UCA1TXD
    17(S)   SIMO        2.5     SPI     ---     ---     SPI     Data    Data    SPI MOSI connection from ADXL (UCA1SIMO)
    18(M)   U-IN        2.6     IN      ---     Drain   UCA1RXD DATA    DATA    UART from Phone, UCA1RXD
    18(S)   SOMI        2.6     SPI     ---     ---     SPI     Data    Data    SPI MISO connection from ADXL (UCA1SOMI)
@@ -805,6 +807,8 @@
 #define SERIAL_BYTES 8      // The last byte is nest_ID[25]
 
     // SMART SENSOR PARAMETERS
+#define LOAD_PARAMETERS_TRIES 1          // The number of times that we will look for a new parameter file each time we connect
+                                        // The default is 1, but more tries are possible.
     // These 40 bytes can be downloaded from the comm tower to change the behavior of the sensor.
 unsigned char parameters[40] = {
         THRESH_ACT_L, THRESH_ACT_H, TIME_ACT, THRESH_INACT_L,
@@ -821,7 +825,8 @@ unsigned char parameters[40] = {
         BINSEC_LO, BINSEC_HI,           // parameters[26] and [27] timing settings for active days
         SLOW_DAYS,                      // parameters[28] - Number of days of low activity
         SLOWBIN_LO, SLOWBIN_HI,         // parameters[29] and [30] - The number of seconds to accumulate readings in each record (set of bins)
-        0,0,0,0,0,0,0,0,0 };            // parameters[31] to [39] reserved for future use
+        LOAD_PARAMETERS_TRIES,          // parameters 31] - the number of times we try to load new parameters (must be 1 or more)
+        0,0,0,0,0,0,0,0 };              // parameters[32] to [39] reserved for future use
 #define PARAM_BYTES 40 // the number of bytes in the parameters structure above
      // new parameters can be ftp'd into the unit from the web
 unsigned char new_parameters[40]= {
@@ -839,7 +844,8 @@ unsigned char new_parameters[40]= {
         BINSEC_LO, BINSEC_HI,
         SLOW_DAYS,
         SLOWBIN_LO, SLOWBIN_HI,
-        0,0,0,0,0,0,0,0,0 };
+        LOAD_PARAMETERS_TRIES,
+        0,0,0,0,0,0,0,0 };
 
 #define PARAM_THRESH_ACT_L      parameters[0]
 #define PARAM_THRESH_ACT_H      parameters[1]
@@ -1629,7 +1635,7 @@ unsigned char receive_message(void)
               // TODO // long messages will need a longer timeout
                       // a new timeout could be set once we know how much data is coming
     else                             // Set the timeout value for synching
-        set_timeout (SYNCH_TIMEOUT); // This is more than 6 seconds.
+        set_timeout (SYNCH_TIMEOUT); // This is a longer timeout for synching up.
     waiting_for_coax_data = YES;     // This flag will wake us up when a byte is received.
     ENTER_LOW_POWER_MODE_3;          // or we'll sleep until the timer runs out.
                                      // If we are still waiting we've received something,
@@ -1882,7 +1888,7 @@ void get_new_parameters(void)
     unsigned char *message_ptr;                     // pointer to sensor ID
     unsigned char datacount;                        // counter for file data
     unsigned char bad_checksum = TRUE;              // flag for checksum results
-    for (tries = 1; bad_checksum && (tries<3) ; tries++) // try 2 times for a good load
+    for (tries = 1; bad_checksum && (tries<LOAD_PARAMETERS_TRIES +1) ; tries++) // trying just once, but multiple tries are possible
     {   wait(980);  // pause between tries
         message_ptr = messages[SENSOR_ID];          // point to the sensor ID
         do_script(read_parameters);                 // download the file
@@ -2129,6 +2135,7 @@ void phone_off(void)
         wait_a_sec(3);          // wait at least 3 seconds
     }
     PHONE_POWER_DISABLE;        // Turn off the phone power
+    PHNMON_LED_OFF;
     phone_UART_off();           // disable the UART
 }
 
@@ -3017,7 +3024,7 @@ void wait_random(void)
 }
 
 // sleep until interval count gets to the last interval
-void wait_out_cycle(void)
+void wait_for_last_cycle(void)
 {   while (interval_count < interval_limit -1)
         ENTER_LOW_POWER_MODE_3;
 }
@@ -3497,14 +3504,14 @@ void slave()
         ENTER_LOW_POWER_MODE_3;     // wait until the next interval begins
 // There are two modes, suspended mode (suspended = YES) and not suspended mode (suspended = NO)
 // Suspended mode is for when the cell phone board is on and reporting data
-        if (suspended)              // hopefully we won't go out of synch in a few minutes
-        {   if ((interval_count == 1)  // listen for messages during interval one, but don't disconnect if there aren't any
+        if (suspended)                   // hopefully we won't go out of synch in a few minutes
+        {   if ( (interval_count == 1)   // listen for messages during interval one, but don't disconnect if there aren't any
                 && (receive_message()) ) // any messages now are about sending data
             {   if (received_command == REQUEST_DATA)
                 {   reporting_data = report_data();     // set up data reporting and sends a block of data
-                                                           // TRUE = Still reporting, FALSE  = Done or fatal error
+                                                        // TRUE = Still reporting, FALSE  = Done or fatal error
                 }
-                else if (received_command == WAKE_UP)
+                else if (received_command == WAKE_UP)   // WAKE_UP is the command to end suspended mode
                     suspended = NO;
             }
             else if (reporting_data)  // the data gets sent in 1K chunks during each interval
@@ -3529,25 +3536,32 @@ void slave()
 // interval one is for adjusting the clock, registering the sensor and housekeeping
 // Also controls when to report data and suspend handshaking
             case 1:           // adjust the interval timer back to a full 125 msec
-            STOP_INTERVAL_TIMER;                // stop the timer while adjusting
-            ZERO_TIMER;
-            NORMAL_INTERVAL;                    // reset to normal interval length after a synch interval
-            START_INTERVAL_TIMER;               // start or restart the timer counter
-            // This is also be the interval for registerring
-            if ((!slave_registered)             // if slave_registered is zero then no slot has been assigned
-                && (receive_message())          // and there's no error receiving the message
-                && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
-            {   if (get_registered())           // register the sensor and assign it an interval
-                {   status = READY;             // if the interval is non-zero we are connected and ready
-                    slave_registered = YES;
-                }
-            }
+            STOP_INTERVAL_TIMER;    // stop the timer while adjusting
+            ZERO_TIMER;             // Start the timer counter at zero again
+            NORMAL_INTERVAL;        // reset to normal interval length after a synch interval
+            START_INTERVAL_TIMER;   // start or restart the timer counter
             watchdog_reset();       // this slot can be used for other housekeeping
             interval_count = 1;     // was there an interrupt generated by resetting the clock?
+            // This is also be the interval for registerring
+            if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
+            {   if ( (receive_message())          // and there's no error receiving the message
+                    && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
+                {   if (get_registered())           // register the sensor and assign it an interval
+                    {   status = READY;             // if the interval is non-zero we are connected and ready
+                        slave_registered = YES;
+                    }
+                }
+            }
+            // and for going in and out of suspend mode during data reporting
+            else if ( (receive_message())       // only if registered.
+                && (received_command == SUSPEND) )
+                {   suspended = YES;            // go into suspend mode if commanded
+                    wait_for_last_cycle();      // wait until the last interval
+                }
             break;
 
             default:
-            // This only happens during the registered interval
+            // This only happens during the registered interval if not suspended
             if (interval_count == this_unit)
             {   //temp = coax_short_message(interval_count);
                 if ( (receive_message())                      // receive a message and there was no error
@@ -3631,7 +3645,7 @@ void master()
                 intervals_on = YES;
                 new_census = NO;
                 new_device_count = 0;           // reset the counter of new devices
-                wait_out_cycle();               // wait until the last interval
+                wait_for_last_cycle();          // wait until the last interval
             }
             else if (data_ready)       //
             {   coax_short_message(SUSPEND);
@@ -3642,7 +3656,7 @@ void master()
                 phone_in();         // send in a report for each sensor
                 time_to_wakeup = YES;
                 intervals_on = YES;
-                wait_out_cycle();
+                wait_for_last_cycle();
             }
             else if (time_to_wakeup)
             {   coax_short_message(WAKE_UP);
@@ -3656,7 +3670,7 @@ void master()
             else if ( (++unable_to_register_count >5) && (new_device_count))
                 new_census = YES; // flag that we are done registering new devices
 
-  //TODO// flag to report new connections and send after there is no response
+  // Reports new connections after there is no further response
   // All phone communications are set up during this interval.  All the sensors are put into suspend mode,
   // meaning that they listen for commands during interval one and don't disconnect if there isn't
   // a handshake during their own interval. The sensors all upload data during the 6 second cycle, which is more than
@@ -3682,6 +3696,7 @@ void master()
                     {   sensor_slot[going_to_unit]= NO; // deregisiter whatever sensor was there
                         sensor_status[going_to_unit]= RECENTLY_DISCONNECTED;
                         device_count--;                 // one less device
+                        new_census = YES;               // flag that we new to report the removal of devices
                         tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
                         RED_LED_ON;                     // long red led blink indicates disconnection
                      }
