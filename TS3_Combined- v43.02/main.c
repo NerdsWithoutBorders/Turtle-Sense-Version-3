@@ -59,9 +59,9 @@
 ////////// PROGRAM PARAMETERS (may vary for each unit)
 
        // REMEMBER TO CHECK THE FTP LOG-IN CREDENTIALS IN THE FOLLOWING TWO LINES!!!!
-       //
-       #define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
-      /#define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
+
+#define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
+#define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
 
 
 #define USER_PASSWORD "ABCDEFGH"  // 8 character password needed for program or parameter downloads.  Recompile with a different password.
@@ -484,6 +484,9 @@
 
 
 #define SAMPLE_SPEED    ODR_100 // Output Data Rate (see above)
+#define INTERVALS       48      // the total number of 1/8 second intervals
+
+/// version two definitions -- might not be needed
 #define READ_SPEED      1       // the number of sets of buffer reads per second.
 #define SLEEP_INTERVALS 8       // Must be a power of 2.  REED_SPEED X SLEEP_INTERVALS should equal 8
     // The timer is set to have an interrupt every 1/8 of a second, so SLEEP_INTERVALS
@@ -712,7 +715,7 @@
     volatile unsigned char received_recipient_bank, received_recipient_unit;
     volatile unsigned char received_protocol; // data from the last message received
     volatile unsigned char received_command_type;
-    volatile unsigned int coax_tx_buff_len;          // The length of the buffer for transmitting to UCA0
+    volatile unsigned int  coax_tx_buff_len;          // The length of the buffer for transmitting to UCA0
     volatile unsigned char *coax_tx_buff_ptr;        // The pointer to the transmit buffer.
     volatile unsigned char coax_char_received;
     volatile unsigned char interval_count;       // Clock timing.  Each interval (1/8 sec) creates an interrupt
@@ -729,6 +732,7 @@
     volatile unsigned int  random;
     volatile unsigned char random_wait;
     volatile unsigned char registering;
+    volatile unsigned int  last_temperature;        // the last temperature reading
 
 
 #define SENSOR_SLOTS 0x30   // start out seeing
@@ -1247,13 +1251,23 @@ unsigned char new_parameters[40]= {
     volatile unsigned char starting_up = YES;       // "Yes" after a reset or power-up, "No" otherwise
     volatile unsigned char force_shut_down = NO;    // Set to "yes" after a bad battery reading
     volatile unsigned int adc_read;                 // The data read in the adc interrupt routine
-    volatile signed int aXold=0;                    // previous acc value, to determine delta acc
-    volatile signed int aYold=0;
-    volatile signed int aZold=0;
-    volatile unsigned char not_first_read = NO;     // reset everytime a new integration starts
-    volatile unsigned long long int e_integrated;   // A running total
-    volatile unsigned int e_sample_count;           // the number of samples added together so far
-    volatile unsigned char e_sample_bits;           // The power of 2 for number of 12.5 Hz sampling,
+    volatile signed int aXold[32];                  //  an array of previous acc values, to determine delta acc
+    volatile signed int aYold[32];
+    volatile signed int aZold[32];
+    volatile signed int aXlast = 0;                  // previous acc values, to determine delta acc
+    volatile signed int aYlast = 0;
+    volatile signed int aZlast = 0;
+    volatile unsigned char not_first_read = NO;         // reset everytime a new integration starts
+    volatile unsigned long long int e_integrated[6];    // Running totals for each ODR
+    volatile unsigned int e_sample_count;               // the number of samples added together so far
+    volatile unsigned char e_sample_bits;               // The power of 2 for number of 12.5 Hz sampling,
+    volatile unsigned char sample_offset;               // a recycling counter from 0 to 31 for counting samples
+    volatile unsigned char odr_count;                   // used in the following arrays
+    const unsigned char samples_back[6] = {1, 2, 4, 8, 16, 32} ;  // how many samples away to compare with
+    const unsigned char odr_masks[6] = {0x00, 0x01, 0x03, 0x07, 0x0F, 0x1F} ; // anded with the sample offset
+                                                        //determine whether to include into ODR integration
+    volatile unsigned char odr_rate_on[6] = { YES, YES, YES, YES, YES, YES} ; // they all start on
+    volatile unsigned char e_sample_bits;               // The power of 2 for number of 12.5 Hz sampling,
         // +1 for 25 Hz, +2 for 50, etc... Minimum is 1, maximum is 11
         // e_sample_bits   12.5  25     50    100       200     400     Time
         //  1               1     2      4      8       16      32      ~.08 seconds
@@ -2276,13 +2290,65 @@ void ADXL_FifoRead(void)
     ADXL_DESELECT;           // deselect
 }
 
+signed int read_temperature(unsigned char temp_readings)
+// Get a temperature reading
+// temp_readings is the power of two number of readings
+// 0 = 1 reading, 1 = 2 readings, 2 = 4 readings, 3 = 8 readings
+// maximum is 0x0F = 32K readings
+{
+    volatile unsigned int temp, temp1, temp2;
+    volatile long int temp_temp;        // temporary temperature reading
+    unsigned int readings = 0x01;       // start off with one reading (if temp_readings is zero)
+    unsigned char temp_bits;            // this will be the number of bits to rotate to divide the accumulation
+    if (temp_readings > 0x0F) temp_readings = 0x0F;    // 15 maximum
+    temp_bits = temp_readings;          // start out the same
+    while (temp_readings)               // as long as this is positive
+    {
+        readings<<= 1;                  // multiply the number of readings by 2
+        temp_readings--;                // one less time to loop
+    }
+    reset_SPI();                        // confirm that SPI is enabled
+    temp_temp = 0;                      // start out with zero temporary temperature
+    for (; readings; readings--)        // This is looped multiple times for an average reading
+    {
+        ADXL_SELECT;                    // Select the chip by setting STE pin low (P2.3)
+        ADXL_TX_BUFF = ADXL_READ;       // Tell the ADXL to transmit the data in a register
+        while(ADXL_TX_NOT_READY);       // wait for the TX buffer to empty
+        ADXL_TX_BUFF =  0x14;           // send the address of the temperature byte
+        while(ADXL_TX_NOT_READY) ;      // wait for the TX buffer to empty
+        ADXL_TX_BUFF= 0xFF;             // Send a dummy byte to push the address out of the buffer
+        while(ADXL_TX_NOT_READY) ;      // wait for the TX buffer to empty
+        ADXL_TX_BUFF= 0xFF;             // Send another dummy byte to push data off the stack
+        temp = UCA1RXBUF;               // this byte is junk -- clear the buffer
+        while(ADXL_RX_NOT_READY);       // wait for the TX buffer to empty
+        ADXL_TX_BUFF= 0xFF;             // Send another dummy byte to push more data off the stack
+        temp1 = UCA1RXBUF;              // get the low byte of temperature byte from the previous send
+        while (ADXL_RX_NOT_READY)       // get the second byte received
+        temp2 = UCA1RXBUF;              // get the low byte of temperature byte from the previous send
+        temp_temp += (temp2<<8)|temp1 ; // add the second byte * 256
+        ADXL_DESELECT;                  // deselect
+        wait(1);                        // wait a msec between readings
+    }
+    last_temperature = temp_temp>>temp_bits;    // divide accumulated readings by the number of readings
+    if (PARAM_CALIBRATE_TEMP)                   // check to see if calibration is on
+    {                                           // use calibration data to adjust the temperature reading
+       MPYS = temp = last_temperature - temperature_offset ;    // Load first operand - signed reading
+       OP2 = temperature_ratio;                                 // Load second operand - unsigned ratio
+       __no_operation();
+       __no_operation();                // wait a tiny bit for the multiplication to finish
+       last_temperature = (temp & 0x8000) | RESHI<<4 | RESLO>>12 ;   // divide result by 0x01000 and restore sign
+    }
+    return (last_temperature);          // return the average of all the readings perhaps calibrated
+}
+
+
 
 // PROCESS the DATA read in from the ADXL FIFO stack
 // and prepare bin histogram
 void Process_data(void)
 {
-    unsigned long int bin_mask;
-    char bin_count;
+ //   unsigned long int bin_mask;
+//    char bin_count;
     signed int tempX, tempY, tempZ;         // temp values
     signed int aX, aY, aZ;                  // value of accelerometer for each coordinate
     signed long int dX, dY, dZ;             // difference values for each coordinate
@@ -2307,16 +2373,16 @@ void Process_data(void)
             if ( not_first_read )       // process the result into the bins
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
-                dX= (aX - aXold);               // compute the differences
-                dY= (aY - aYold);
-                dZ= (aZ - aZold);
+                dX= (aX - aXlast);               // compute the differences
+                dY= (aY - aYlast);
+                dZ= (aZ - aZlast);
                 mag_squared = square(dX) + square(dY) + square(dZ);  // sum the square of the differences
-                    // bin 29 (28 counting from bin 0) is the highest bit possible (but very unlikely)
-                bin_mask = JOLT_MASK;           // Start looking at the highest bit possible
-                for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
+//                    // bin 29 (28 counting from bin 0) is the highest bit possible (but very unlikely)
+//                bin_mask = JOLT_MASK;           // Start looking at the highest bit possible
+//                for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
                     //mask off one bit and see if it is zero
-                    bin_mask >>= 1 ;            // if so move the mask over one bit to the right and look at the next bin
-                buffer.bins[bin_count]++ ;      // increment the appropriate bin
+//                    bin_mask >>= 1 ;            // if so move the mask over one bit to the right and look at the next bin
+//                buffer.bins[bin_count]++ ;      // increment the appropriate bin
                 data.bins[recCount][READINGS]++ ;    // increment the number of readings
             }
             else
@@ -2327,34 +2393,29 @@ void Process_data(void)
                 data.bins[recCount][Y_POS] = aY;
                 data.bins[recCount][Z_POS] = aZ;
             }           // save the reading for next time in aXold, aYold, and aZold
-            aXold = aX;
-            aYold = aY;
-            aZold = aZ;
+            aXlast = aX;
+            aYlast = aY;
+            aZlast = aZ;
         }
         x = x+3;        // increment the counter to look at the next readings
     }
 }
 
 
-
-
-
-
-
+///////////// INTEGRATE DATA ////////////////////////////////////
 // PROCESS the DATA read in from the ADXL FIFO stack
-// and integrate the data regularly by summing squares of the delta
-// The sums go into a long long (64) bits, so the maximum ODR and sample time before an overload
+// and integrate the data regularly by summing squares of the delta X, Y and Z
+// The sums go into an array of long longs (64 bits), so the maximum ODR and sample time before an overload
 // is 25bits (the highest reading squared) summed 39 bit times at 400 samples per second is
 // more than 20 years!
 void integrate_data(void)
 {
-    unsigned long int bin_mask;
-    char bin_count;
-    signed int tempX, tempY, tempZ;         // temp values
-    signed int aX, aY, aZ;                  // value of accelerometer for each coordinate
-    signed long int dX, dY, dZ;             // difference values for each coordinate
-    signed long int mag_squared;            // absolute magnitude of vector squared (dX^2 + dY^2 +dZ^2)
-
+    signed int tempX, tempY, tempZ; // temp values
+    signed int aX, aY, aZ;          // value of accelerometer for each coordinate
+    signed long int dX, dY, dZ;     // difference values for each coordinate
+    unsigned char old_offset;       // where to look in the tables for the old data
+    unsigned char odr_count;        // counts from 0 to 5 for the different ODRs
+                                    // 0 = 400, 1 = 200, 2 = 100, 3 = 50, 4 = 25 and 5 = 12.5
     //Skip over bad data and synch up with the good data
     for (x=0; x< DATA_BUFFER_SIZE-3 && !( ((incoming.spi[x] & X_READING) == X_READING) &&
                                         ((incoming.spi[x+1] & Y_READING) == Y_READING) &&
@@ -2371,48 +2432,50 @@ void integrate_data(void)
             aX= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
             aY= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
             aZ= (tempZ & ADXL_MASK) | ((tempZ & NEG_MASK)<<2);
-            if ( not_first_read )       // process the result into the bins
+                 // integrate the data for multiple ODRs
+            if ( not_first_read )       // skip the first reading, nothing to subtract!
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
-                dX= (aX - aXold);               // compute the differences
-                dY= (aY - aYold);
-                dZ= (aZ - aZold);
-                mag_squared = square(dX) + square(dY) + square(dZ);  // sum the square of the differences
-                    // bin 29 (28 counting from bin 0) is the highest bit possible (but very unlikely)
-      //          bin_mask = JOLT_MASK;           // Start looking at the highest bit possible
-     //           for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
-                    //mask off one bit and see if it is zero
-     //               bin_mask >>= 1 ;            // if so move the mask over one bit to the right and look at the next bin
-     //           buffer.bins[bin_count]++ ;      // increment the appropriate bin
-     //           data.bins[recCount][READINGS]++ ;    // increment the number of readings
+                for (odr_count = 0; odr_count < 6; odr_count ++)
+                {
+                    if ( (odr_rate_on[odr_count]) && !(sample_offset & odr_masks[odr_count]) )
+                    {
+                        if (sample_offset)
+                            old_offset = (sample_offset - samples_back[odr_count]);
+                        else
+                            old_offset = (INTERVALS - samples_back[odr_count]);
+                        dX= (aX - aXold[old_offset]);           // compute the differences
+                        dY= (aY - aYold[old_offset]);
+                        dZ= (aZ - aZold[old_offset]);
+                        e_integrated[odr_count] = square(dX) + square(dY) + square(dZ);  // sum the square of the differences
+                    }
+                }
             }
             else
-            {   not_first_read = TRUE ;
-                        // Save the first reading off the stack in the orientation log
-            // TODO // make this an average reading
+            {
+                for (odr_count = 0; odr_count < 6; odr_count ++)
+                    e_integrated[odr_count] = 0;    // clear the integrals
+                not_first_read = TRUE ;
+                sample_offset = 0;
+            // Save the first reading off the stack in the orientation log
+            // TODO // make this an average reading and store elswhere!
                 data.bins[recCount][X_POS] = aX;
                 data.bins[recCount][Y_POS] = aY;
                 data.bins[recCount][Z_POS] = aZ;
-            }           // save the reading for next time in aXold, aYold, and aZold
-            aXold = aX;
-            aYold = aY;
-            aZold = aZ;
+            }
+            // save the reading for next time in aXold, aYold, and aZold
+            aXold[sample_offset] = aX;
+            aYold[sample_offset] = aY;
+            aZold[sample_offset] = aZ;
+            sample_offset = ((sample_offset + 1) & 0x1F );  // cycle from 0 to 31, 32 becomes 0
+            e_sample_count++ ;                          // keep track of how many reads
+
+            //TODO// finish up a record
         }
-        else    // once we hit zeros we're done.
-        x = x+3;        // increment the counter to look at the next readings
+        else                    // once we hit zeros we're done.
+        x = DATA_BUFFER_SIZE;   // skip over the rest of the data buffer, there is no more data
     }
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
     // CLEAR THE TEMPORARY BINS
@@ -2813,6 +2876,7 @@ void send_parameters(void)
 {   transfer_string(parameters, PARAM_BYTES, SEND);
 }
 
+
 // LIKELY NO LONGER NEEDED
 ////////////// Command 0x0F -- SEND a PROGRESS REPORT (error_code)
     // Sends a one byte code that explains the reason for status of the smart sensor
@@ -2835,100 +2899,56 @@ void send_parameters(void)
     // 0xA0 = Unknown Start up error
 
 
-void send_progress_report(void)
-{   UCA0CTL1 |= UCSWRST;            // Reset the UART
-    __no_operation();
-    UCA0CTL1 &= ~UCSWRST;           // confirm that UART is enabled
-    wait(1);
-    while(COAX_TX_NOT_READY);                // wait for an empty buffer
-    UCA0TXBUF= command ;                // send the code
-    wait(1);
-    while(COAX_TX_NOT_READY);                // wait for an empty buffer
-    UCA0TXBUF= error_code ;             // send the code
-}
 
-// KEEP AND REWRITE FOR PHASE 2 COMPATIBILITY
 ////////////// Command RESUME_RUN -- Resume Run and Process data in bins
     // resets the sensor and gets things going
+    // in Phase 2 this was a continuous process that continued until it was time to report
+    // in Phase 3 this is just a single read and process.  New reports are created when it is time
+    // Re written for phase 2 compatibility
 void resume_run_bins(void)
-{   volatile unsigned int temp, temp1, temp2;
-    volatile unsigned char reads, out_of_time = 0;
-    volatile long int temp_temp; // temporary temperature reading
-
-            // Continue until it is time to stop
-    while ((recCount < maxRecords) && (!out_of_time))  // continue if there is room for more and still time
+{   volatile unsigned char reads, out_of_time = 0;
+    if ((recCount < maxRecords) && (!out_of_time))  // continue if there is room for more and still time
     {                           // recCount goes from 0 to MAXRECORDS minus 1
-        P2OUT &= ~BIT0;
-        for (reads = PARAM_READ_SPEED; reads > 0 ; reads-- )
-        {   interval(PARAM_SLEEP_INTERVALS);       // Enter low power mode 3 for a fraction of a second (the loop starts up again every 1/8 second -- restored by timer interupt)
-            ADXL_FifoRead();        // Read the data off the ADXL FIFO stack
-            Process_data();         // process the data and store in buffer.bins array
-        }
+        interval(PARAM_SLEEP_INTERVALS);       // Enter low power mode 3 for a fraction of a second (the loop starts up again every 1/8 second -- restored by timer interupt)
+        ADXL_FifoRead();        // Read the data off the ADXL FIFO stack
+        Process_data();         // process the data and store in buffer.bins array
+        if(!(interval_count & 0x07))    // increment counters every second
+        {                               // This only happens every 8 intervals
+            recSecs++;                  // Increment the number of seconds in the current record
+            secCount++;                 // Increment the total number of seconds since last transmission
+            out_of_time = (secCount > max_run_time);// Flag if we are in overtime
+            if ((recSecs >= secMax) || out_of_time) // Check to see if it is time to start a new record or time has run out
+            {                           // Process and store the temporary bins in the record.
+                bin = JOLT_BITS - 1;    // Start with the bin with the highest readings
+                while( (bin>0) && (buffer.bins[bin] == 0) ) bin =  bin - 1 ; // Find the highest bin with a non zero count in it
+                data.bins[recCount][HIGHEST_BIN]= bin + 1;   // Save it in the highest_bin array (1-25)
+                if (bin < MAX_BIN-1) bin = MAX_BIN-1;   // is room for all the bins with non-zero data if not, we'll drop the lowest ones
+                z = DATA_SIZE;                          // Counter for the real data storage bins in the record
+                while (z > BINS)
+                {                       // transfer the temporary data into the record
+                    z =  z - 1;         // the range of the array is MAX_BIN - 1 to zero.
+                    data.bins[recCount][z] = buffer.bins[bin];  // move the temp bin to the array.
+                    bin = bin - 1 ;     // fill all of them.
+                }
+                clear_temp_bins();      // reset the buffer.bins for the next record
+                not_first_read = NO;    // reset for the first read
+                data.bins[recCount][TEMPS] = read_temperature(3); // store the average of 2^3 temperature readings
+                            // prepare for a new record
+            recSecs = 0 ;   // reset the second counter
+            recCount++ ;    // and add a new record
 
-                // increment counters
-        recSecs++;                  // Increment the number of seconds in the current record
-        secCount++;                 // Increment the total number of seconds since last transmission
-        out_of_time = (secCount > max_run_time);
-        if ((recSecs >= secMax) || out_of_time) // Check to see if it is time to start a new record or time has run out
-
-                // Process and store the temporary bins in the record.
-        {   bin = JOLT_BITS - 1;    // Start with the bin with the highest readings
-            while( (bin>0) && (buffer.bins[bin] == 0) ) bin =  bin - 1 ; // Find the highest bin with a non zero count in it
-            data.bins[recCount][HIGHEST_BIN]= bin + 1;   // Save it in the highest_bin array (1-25)
-            if (bin < MAX_BIN-1) bin = MAX_BIN-1;   // is room for all the bins with non-zero data if not, we'll drop the lowest ones
-            z = DATA_SIZE;                          // Counter for the real data storage bins in the record
-            while (z > BINS)
-            {   // transfer the temporary data into the record
-                z =  z - 1;                             // the range of the array is MAX_BIN - 1 to zero.
-                data.bins[recCount][z] = buffer.bins[bin];       // move the temp bin to the array.
-                bin = bin - 1 ;                         // fill all of them.
             }
-            clear_temp_bins();  // reset the buffer.bins for the next record
-
-                // Get a temperature reading
-            reset_SPI();                        // confirm that SPI is enabled
-            temp_temp = 0;                      // start out with zero
-            for (z=8; z>0; z--)                 // This is looped 8 times for an average reading
-            {   ADXL_SELECT;          // Select the chip by setting STE pin low (P2.3)
-                ADXL_TX_BUFF = ADXL_READ;          // Tell the ADXL to transmit the data in a register
-                while(ADXL_TX_NOT_READY);             // wait for the TX buffer to empty
-                ADXL_TX_BUFF =  0x14;              // send the address of the temperature byte
-                while(ADXL_TX_NOT_READY) ;            // wait for the TX buffer to empty
-                ADXL_TX_BUFF= 0xFF;                // Send a dummy byte to push the address out of the buffer
-                while(ADXL_TX_NOT_READY) ;            // wait for the TX buffer to empty
-                ADXL_TX_BUFF= 0xFF;                // Send another dummy byte to push data off the stack
-                temp = UCA1RXBUF;               // this byte is junk -- clear the buffer
-                while(ADXL_RX_NOT_READY);             // wait for the TX buffer to empty
-                ADXL_TX_BUFF= 0xFF;                // Send another dummy byte to push more data off the stack
-                temp1 = UCA1RXBUF;              // get the low byte of temperature byte from the previous send
-                while (ADXL_RX_NOT_READY)             // get the second byte received
-                temp2 = UCA1RXBUF;              // get the low byte of temperature byte from the previous send
-                temp_temp += (temp2<<8)|temp1 ; // add the second byte * 256
-                ADXL_DESELECT;           // deselect
-                wait(1);
-            }
-            data.bins[recCount][TEMPS] = temp_temp>>3;   // divide 8 accumulated readings by 8
-            if (parameters[24])                     // check to see if calibration is on
-            {       // use calibration data to adjust the temperature reading
-                  MPYS = temp = data.bins[recCount][TEMPS] - temperature_offset ;    // Load first operand - signed reading
-                  OP2 = temperature_ratio;                                      // Load second operand - unsigned ratio
-                  __no_operation();
-                  __no_operation();     // wait a tiny bit for the multiplication to finish
-                  data.bins[recCount][TEMPS] = (temp & 0x8000) |RESHI<<4 | RESLO>>12 ;   // divide result by 0x01000 and restore sign
-            }
-
-                // prepare for a new record
-        recSecs = 0 ;           // reset the second counter
-        recCount++ ;            // and add a new record
-
         }
     }
 }
 
-// KEEP AND REWRITE FOR PHASE TWO COMPATIBILITY
-////////////// Command RUN_BINS -- START a new RUN and Process data in BINS
+
+////////////// Command START BIN RUN -- START a new RUN and Process data in BINS
     // resets the sensor and gets things going
-void start_run_bins(void)
+    // called after sending a report.
+    // KEPT FOR PHASE TWO COMPATIBILITY
+    // not much error checking
+void start_bin_run(void)
 {   clear_all_records();    // Reset the memory
     if (ADXL_reset()) return; // Reset and initialize the ADXL
     ADXL_on();              // Turn the sensor on
@@ -2938,13 +2958,12 @@ void start_run_bins(void)
     recCount = 0;           // Reset counts
     secCount = 1;           // Reset the number of seconds we have been running
     data.bins[0][READINGS] = 0;  // Reset the number of readings to zero
-    if (error_code & 0x80) return;  // if there is an error, don't go any further
-    resume_run_bins();              // start 'er up.
+//    resume_run_bins();    // should be called every interval to collect data in bins
 }
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////// NEW PHASE THREE COMMANDS ///////////////////////////////
+//////////////////////////////////////////////////  PHASE THREE COMMANDS //////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void synch_event_clock(void)
@@ -3276,7 +3295,7 @@ void slave_routines()
                 received_command = STATUS;
                 break;
             case RUN_BINS :
-                start_run_bins();           // starts a new run after resetting everything
+                start_bin_run();           // starts a new run after resetting everything
                 status = BUSY;
                 received_command = STATUS;
                 break;
@@ -3476,7 +3495,7 @@ void common_startup(void)
     watchdog_reset();               // Remove hold from watchdog
     going_to_bank = this_bank = TURTLE_SENSE_BANK;   //we'll just be using one bank of sensors
     current_command_bank = CORE_COMMAND_BANK;                   //and one bank of commands
-    interval_limit = 48;
+    interval_limit = INTERVALS;
     interval_count = 0;             // reset the interval clock
     intervals_on = YES;         // The slave never is, the master starts off quiet.
 }
