@@ -19,7 +19,7 @@
 
 #define MASTER 0
 #define SLAVE  1
-#define THIS_UNIT SLAVE
+#define THIS_UNIT MASTER
 
 /*
        /////////////////////////////////////////////////////////////////////////////////////////////
@@ -72,12 +72,12 @@
 
 // The following is only necessary for compiling a SMART SENSOR slave
        // SMART SENSOR IDENTIFICATION
-#define NEST_ID "123456.000,060914,S-AA0004"
+#define NEST_ID "123456.000,060914,M-AA0002"
        // The last 6 digits is a unique serial number for each smart sensor.
        // Update the last 6 digits before compiling for each new device.
        // The rest of the data will be updated during each new registration with a master
        // What you see here is just an example of what it could look like
-#define SERIAL_NUMBER "S-AA0004"   // Unique serial number for each device.  Update before compiling for a new device
+#define SERIAL_NUMBER "M-AA0002"   // Unique serial number for each device.  Update before compiling for a new device
 #define SERIAL_ID_LEN   8          // length of serial number string (don't change without changing all the places this is used)
        // PHASE THREE SERIAL NUMBER TEMPLATES
        // M-AA####  -- Master device
@@ -691,7 +691,7 @@
                 force_shut_down, wd_reset, starting_up, sensor_plugged_in, coax_buffer_full;
 
     volatile unsigned char led_count, led_start_count, ping_count, ping_start_count;      // counts clock interrupts every eighth of a second, wakes up every 8 counts
-    volatile unsigned char bad_transmission, processing_command, coax_quiet;     //status flags for error and ready to process
+    volatile unsigned char bad_transmission, processing_command;     //status flags for error and ready to process
     volatile unsigned int bytecount;                    // counts the number of bytes in the current received command
     volatile unsigned int received_datalength;          // max 64K?
     volatile unsigned long int running_checksum, received_checksum; // keep a checksum to look for conversation errors
@@ -984,7 +984,7 @@ unsigned char new_parameters[40]= {
             "_r-",                  // messages[51]  "r-" -- a standard report
             "=\"parameters",        // messages[52] parameter file name beginning
             ".ts",                  // messages[53] parameter file name ending
-            "TurtleSense 0.2504 -- CC 4.0 BY-SA NerdsWithoutBorders.Net\r", // messages[54] COPYLEFT NOTICE
+            "TurtleSense 0.43.02 -- CC 4.0 BY-SA NerdsWithoutBorders.Net\r", // messages[54] COPYLEFT NOTICE
             "--end of report--\r",  // messages[55]
             ",  ",                  // messages[56] comma and a space
             "_",                    // messages[57] underscore
@@ -1258,33 +1258,39 @@ unsigned char new_parameters[40]= {
     volatile signed int aYlast = 0;
     volatile signed int aZlast = 0;
     volatile unsigned char not_first_read = NO;         // reset everytime a new integration starts
-    volatile unsigned long long int e_integrated[6];    // Running totals for each ODR
+    volatile unsigned long long int e_integrated[7];    // Running totals for each ODR
     volatile unsigned int e_sample_count;               // the number of samples added together so far
-    volatile unsigned char e_sample_bits;               // The power of 2 for number of 12.5 Hz sampling,
     volatile unsigned char sample_offset;               // a recycling counter from 0 to 31 for counting samples
-    volatile unsigned char odr_count;                   // used in the following arrays
-    const unsigned char samples_back[6] = {1, 2, 4, 8, 16, 32} ;  // how many samples away to compare with
-    const unsigned char odr_masks[6] = {0x00, 0x01, 0x03, 0x07, 0x0F, 0x1F} ; // anded with the sample offset
-                                                        //determine whether to include into ODR integration
-    volatile unsigned char odr_rate_on[6] = { YES, YES, YES, YES, YES, YES} ; // they all start on
-    volatile unsigned char e_sample_bits;               // The power of 2 for number of 12.5 Hz sampling,
-        // +1 for 25 Hz, +2 for 50, etc... Minimum is 1, maximum is 11
+                                                        // used in the following arrays
+    const unsigned char odr_order[32]    =   {5, 1, 2,1, 3,1,2,1, 4,1,2,1,3, 1, 2, 1, 6, 1, 2, 1, 3, 1, 2, 1,4, 1, 2, 1, 3, 1, 2, 1} ;
+        // which ODR (except the 400 sample speed) we add the sum of the squares of the differences
+        // ODRs:  0 = 400,  1 = 200,  2 = 100,  3 = 50,  4 = 25,  5 = 12.5,  6 = 12.5 (not needed)
+        // This assumes that the ODR for the ADXL chip is set at 400 samples per second.
+        // for other speeds: 0 = the set output data rate (ODR), 1 = ODR/2,  2 = ODR/4, etc...
+    const unsigned char old_odr_sample[32] = {0,31,30,1,28,3,2,5,24,7,6,9,4,11,10,13,16,15,14,17,12,19,18,21,8,23,22,25,20,27,26,29} ;
+        // which stored sample in the array to compare with
+    volatile unsigned char odr_rate_on[7] = { YES, YES, YES, YES, YES, YES, NO} ;
+        //determine whether to include into ODR integration. They all start on.
+        //#6 is the same as #5 so it is off.
+    volatile unsigned char e_sample_bits;     // The power of 2 for number of samples at the ADXL's ODR
+        // assuming the ODR is 400  Minimum is 5, maximum is 15.  For other ODRs:
+        // -5 for 12.5 Hz, -4 for 25, -3 for 50,  -2 for 100,  -1 for 200
         // e_sample_bits   12.5  25     50    100       200     400     Time
-        //  1               1     2      4      8       16      32      ~.08 seconds
-        //  2               2     4      8     16       32      64      ~.16 seconds
-        //  3               4     8     16     32       64     128      ~.32 seconds
-        //  4               8    16     32     64      128     256      ~.64 seconds
-        //  5              16    32     64    128      256     512      ~1.3 seconds
-        //  6              32    64    128    256      512    1024      ~2.5 seconds
-        //  7              64   128    256    512     1024    2048      ~5.1 seconds
-        //  8             128   256    512   1024     2048    4096       ~10 seconds (default)
-        //  9             256   512   1024   2048     4096    8192       ~20 seconds
-        // 10             512  1024   2048   4096     8182   16384       ~41 seconds
-        // 11            1024  2048   4096   8182    16385   32768       ~82 seconds
+        //   5              1     2      4      8       16      32      ~.08 seconds
+        //   6              2     4      8     16       32      64      ~.16 seconds
+        //   7              4     8     16     32       64     128      ~.32 seconds
+        //   8              8    16     32     64      128     256      ~.64 seconds
+        //   9             16    32     64    128      256     512      ~1.3 seconds
+        //  10             32    64    128    256      512    1024      ~2.5 seconds
+        //  11             64   128    256    512     1024    2048      ~5.1 seconds
+        //  12            128   256    512   1024     2048    4096       ~10 seconds (default)
+        //  13            256   512   1024   2048     4096    8192       ~20 seconds
+        //  14            512  1024   2048   4096     8182   16384       ~41 seconds
+        //  15           1024  2048   4096   8182    16385   32768       ~82 seconds
 
-    volatile unsigned int e_sample_limit;           // The number of samples we'll take (64K max)
-    volatile unsigned int bin=0;         // bin counter
-    volatile char slave_registered;       // the interval assigned by the master during registration
+    volatile unsigned int e_sample_limit;   // The number of samples we'll take (64K max)
+    volatile unsigned int bin=0;            // bin counter
+    volatile char slave_registered;         // the interval assigned by the master during registration
 
     union Records
     {    unsigned char bytes[MAX_RECORDS][(MAX_BIN+6)*2];    // data storage as bytes
@@ -1758,11 +1764,11 @@ void phone_UART_off(void)
         // Sends an AT code or string to the phone
 void sendMessage(unsigned char message_code)    // the array number of the pointers is passed
 {   unsigned char AT_tx_char;                   // The character we will send out
+    unsigned char last_char;                    // the last character sent
     unsigned int buffer_count;                  // a counter while scanning the buffer
     unsigned char cr_count;                     // counting carriage returns
     unsigned char *string2send;                 // we'll put the pointer here
-    coax_quiet = NO;                            // prevent the timer interrupts from interfeering
-    while(PHONE_TX_NOT_READY);                   // wait for previous byte to complete
+    while(PHONE_TX_NOT_READY);                  // wait for previous byte to complete
     reset_phone_UART();
     not_timed_out = YES;        //TODO// make timeouts work!
     buffer_count = 0;
@@ -1773,21 +1779,20 @@ void sendMessage(unsigned char message_code)    // the array number of the point
     if (message_code==AT_NO_ECHO) cr_count = 4; // Wait for extra message of "+PACSP0"
     while (AT_tx_char = *string2send)           // get the next character and also continue looping if it is non-zero
     {   string2send++;                          // increment the pointer so it points to the next char
-        PHONE_TX_BUFF = AT_tx_char;             // Send the byte
+        PHONE_TX_BUFF = last_char = AT_tx_char; // Send and store the byte
         while(PHONE_TX_NOT_READY);              // Wait until the buffer is empty
     }
     while (cr_count)
     {   while (PHONE_RX_BUFF_EMPTY);     // wait for data
         if ((incoming.uart[buffer_count++] = PHONE_RX_BUFF) == ASCII_CR) cr_count-- ;
     }
-    if ((message_code==AT_CREG) && (buffer_count > 9)) connection_code = (incoming.uart[9]-0x30) ;    // return CREG registration code
-    coax_quiet = YES;
-    if (AT_tx_char == ASCII_CR)     // At the end of all lines
+    if ((message_code==AT_CREG) && (buffer_count > 9)) connection_code = (incoming.uart[9]-0x30) ; // return CREG registration code
+    if ( last_char == ASCII_CR)     // At the end of all lines
     {   if (message_code < CR)         // At the end of all all AT command lines
-        {   if (buffer_count) error_code = (incoming.uart[0]-0x30); //Error codes from AT commands 0= no error
+//        {   if (buffer_count) error_code = (incoming.uart[0]-0x30); //Error codes from AT commands 0= no error
             wait(980);                      //wait a second between AT commands
-        }
-    blink(1);                               // blink as we process messages
+//        }
+        blink(1);                               // blink as we process messages
     }
 }
 
@@ -1820,10 +1825,9 @@ void makeConnection(void)
     sendMessage(AT_CREG);           // Send AT code to request a registration report
     while ( (connection_code != CELL_REGISTERED) && (connection_code !=ROAMING) )   // added roaming
         // Keep trying until there is a connection
-    {   coax_quiet = YES;          // this turns on sleep timer interrupts we can wake up
+    {
         wait_a_sec(1);                   // wait a second before trying again
         reset_phone_UART();         // reset the UART if that is the problem
-        coax_quiet = NO;           // turn off sleep timer interrupts
         sendMessage(AT_CREG);       // Send AT code to request a registration report
     }                                       // TODO // better error handling!
 }
@@ -1996,7 +2000,6 @@ void report_record_data(void)
         {   send_integer(report_count);     // send a count
             sendMessage(COMMA);             // send a comma
         }
-        coax_quiet = NO;
         reset_phone_UART();
 //        PHONE_TX_ENABLE;
         for (char_count = 0; char_count < 32; char_count +=2)   // go through them two by two
@@ -2342,13 +2345,13 @@ signed int read_temperature(unsigned char temp_readings)
 }
 
 
-
+// Phase Two processing
 // PROCESS the DATA read in from the ADXL FIFO stack
 // and prepare bin histogram
 void Process_data(void)
 {
- //   unsigned long int bin_mask;
-//    char bin_count;
+    unsigned long int bin_mask;
+    char bin_count;
     signed int tempX, tempY, tempZ;         // temp values
     signed int aX, aY, aZ;                  // value of accelerometer for each coordinate
     signed long int dX, dY, dZ;             // difference values for each coordinate
@@ -2377,12 +2380,12 @@ void Process_data(void)
                 dY= (aY - aYlast);
                 dZ= (aZ - aZlast);
                 mag_squared = square(dX) + square(dY) + square(dZ);  // sum the square of the differences
-//                    // bin 29 (28 counting from bin 0) is the highest bit possible (but very unlikely)
-//                bin_mask = JOLT_MASK;           // Start looking at the highest bit possible
-//                for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
+                    // bin 29 (28 counting from bin 0) is the highest bit possible (but very unlikely)
+                bin_mask = JOLT_MASK;           // Start looking at the highest bit possible
+                for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
                     //mask off one bit and see if it is zero
-//                    bin_mask >>= 1 ;            // if so move the mask over one bit to the right and look at the next bin
-//                buffer.bins[bin_count]++ ;      // increment the appropriate bin
+                    bin_mask >>= 1 ;            // if so move the mask over one bit to the right and look at the next bin
+                buffer.bins[bin_count]++ ;      // increment the appropriate bin
                 data.bins[recCount][READINGS]++ ;    // increment the number of readings
             }
             else
@@ -2404,16 +2407,20 @@ void Process_data(void)
 
 ///////////// INTEGRATE DATA ////////////////////////////////////
 // PROCESS the DATA read in from the ADXL FIFO stack
-// and integrate the data regularly by summing squares of the delta X, Y and Z
+// Phase III routine integrates the data regularly by summing squares of the delta X, Y and Z
 // The sums go into an array of long longs (64 bits), so the maximum ODR and sample time before an overload
 // is 25bits (the highest reading squared) summed 39 bit times at 400 samples per second is
 // more than 20 years!
+// The number of samples integrated is always a power of 2.  That way it can easily be divided.
+// The default is just over 10 seconds per integration.  The highest and lowest value are reported in each record.
+// The default record size is 30 minutes.
 void integrate_data(void)
 {
     signed int tempX, tempY, tempZ; // temp values
     signed int aX, aY, aZ;          // value of accelerometer for each coordinate
     signed long int dX, dY, dZ;     // difference values for each coordinate
     unsigned char old_offset;       // where to look in the tables for the old data
+    unsigned char other_odr;        // The other ODR we computer for each sample
     unsigned char odr_count;        // counts from 0 to 5 for the different ODRs
                                     // 0 = 400, 1 = 200, 2 = 100, 3 = 50, 4 = 25 and 5 = 12.5
     //Skip over bad data and synch up with the good data
@@ -2436,27 +2443,34 @@ void integrate_data(void)
             if ( not_first_read )       // skip the first reading, nothing to subtract!
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
-                for (odr_count = 0; odr_count < 6; odr_count ++)
-                {
-                    if ( (odr_rate_on[odr_count]) && !(sample_offset & odr_masks[odr_count]) )
-                    {
-                        if (sample_offset)
-                            old_offset = (sample_offset - samples_back[odr_count]);
-                        else
-                            old_offset = (INTERVALS - samples_back[odr_count]);
-                        dX= (aX - aXold[old_offset]);           // compute the differences
-                        dY= (aY - aYold[old_offset]);
-                        dZ= (aZ - aZold[old_offset]);
-                        e_integrated[odr_count] = square(dX) + square(dY) + square(dZ);  // sum the square of the differences
-                    }
+                old_offset = (sample_offset + 0x1F) & 0x1F ; // subtract 1, but 0 becomes 0x1F
+                dX= (aX - aXold[old_offset]);           // compute the differences
+                dY= (aY - aYold[old_offset]);
+                dZ= (aZ - aZold[old_offset]);
+                // sum the square of the differences for the highest data rates
+                e_integrated[0] = square(dX) + square(dY) + square(dZ);
+                // repeat for the other data rates
+                other_odr = odr_order[sample_offset];
+                // all 5 of the other ODRs can be processed together
+                if ( (odr_rate_on[other_odr])
+                    && ( (old_offset = old_odr_sample[sample_offset]) < e_sample_count) );
+                // skip if we don't care about that sample rate or there is no old sample to compare to
+                {   // for the other data rates, each of the 32 samples looks at a different stored sample
+                    dX= (aX - aXold[old_offset]);           // compute the differences for other data rates
+                    dY= (aY - aYold[old_offset]);
+                    dZ= (aZ - aZold[old_offset]);
+                    e_integrated[other_odr] = square(dX) + square(dY) + square(dZ);
+                    // sum the square of the differences and add to the corresponding accumulators for the other rates
                 }
+
             }
             else
             {
-                for (odr_count = 0; odr_count < 6; odr_count ++)
+                for (odr_count = 0; odr_count < 7; odr_count ++)
                     e_integrated[odr_count] = 0;    // clear the integrals
                 not_first_read = TRUE ;
                 sample_offset = 0;
+                e_sample_count = 0;     // restart the count
             // Save the first reading off the stack in the orientation log
             // TODO // make this an average reading and store elswhere!
                 data.bins[recCount][X_POS] = aX;
@@ -2467,9 +2481,8 @@ void integrate_data(void)
             aXold[sample_offset] = aX;
             aYold[sample_offset] = aY;
             aZold[sample_offset] = aZ;
-            sample_offset = ((sample_offset + 1) & 0x1F );  // cycle from 0 to 31, 32 becomes 0
-            e_sample_count++ ;                          // keep track of how many reads
-
+            sample_offset = ((sample_offset + 1) & 0x1F );      // cycle from 0 to 31, 32 becomes 0
+            e_sample_count++;    // keep track of how many samples have been added to the fastest ODR integration
             //TODO// finish up a record
         }
         else                    // once we hit zeros we're done.
@@ -2906,7 +2919,8 @@ void send_parameters(void)
     // in Phase 3 this is just a single read and process.  New reports are created when it is time
     // Re written for phase 2 compatibility
 void resume_run_bins(void)
-{   volatile unsigned char reads, out_of_time = 0;
+{   unsigned char reads, out_of_time = 0;
+    unsigned char bin;
     if ((recCount < maxRecords) && (!out_of_time))  // continue if there is room for more and still time
     {                           // recCount goes from 0 to MAXRECORDS minus 1
         interval(PARAM_SLEEP_INTERVALS);       // Enter low power mode 3 for a fraction of a second (the loop starts up again every 1/8 second -- restored by timer interupt)

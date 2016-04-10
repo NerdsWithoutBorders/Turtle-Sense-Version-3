@@ -194,7 +194,7 @@
                 sensor_ready, tamper_count, transmission_done, pause, waiting_for_coax_data, message_in_progress,
                 sending_msg, receiving_msg, phone_buffer_full, coax_buffer_full;
     extern volatile unsigned char id_bank, id_number, caller_bank, caller_number, command_bank, command_number;
-    extern volatile unsigned char bad_transmission, processing_command, coax_quiet;     //status flags for error and ready to process
+    extern volatile unsigned char bad_transmission, processing_command;     //status flags for error and ready to process
     extern volatile unsigned int bytecount;             // counts the number of bytes in the current received command
     extern volatile unsigned long received_datalength;
     extern volatile unsigned long long command_checksum, received_checksum; // keep a checksum to look for conversation errors
