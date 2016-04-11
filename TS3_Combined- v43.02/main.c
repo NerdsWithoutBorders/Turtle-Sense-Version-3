@@ -484,7 +484,7 @@
 
 
 #define SAMPLE_SPEED    ODR_100 // Output Data Rate (see above)
-#define INTERVALS       48      // the total number of 1/8 second intervals
+
 
 /// version two definitions -- might not be needed
 #define READ_SPEED      1       // the number of sets of buffer reads per second.
@@ -632,9 +632,11 @@
 
 ////////////// PROGRAM TIMINGS///////////////////////////
     // Default timings  (You can change these)
-#define HOURS 4         // Default is 4  // Number of hours for data collection per call-in period once motion detected.  This must be a factor of 120.
-#define SLOWHOURS 24        // Default is 24 // Number of hours in a slow day of data collection
-#define SLOW_DAYS 40    // Number of days that should elapse until there is more frequent reporting
+#define HOURS                4  // Default is 4  // Number of hours for data collection per call-in period once motion detected.  This must be a factor of 120.
+#define SLOWHOURS           24  // Default is 24 // Number of hours in a slow day of data collection
+#define SLOW_DAYS           40  // Number of days that should elapse until there is more frequent reporting
+#define INTERVALS           48  // the total number of 1/8 second intervals (6 seconds total)
+#define REGISTRATION_WAIT    5  // Number of (6 second) loops to wait before reporting status changes of connected devices
 
     // These are computed (don't change them)
 #define BINSEC (15 * HOURS)     // The default is 60 // Number of seconds in each bin record.  Must be factor of 3600
@@ -681,27 +683,47 @@
 
     #pragma SET_DATA_SECTION(".TI.persistent")
 
-// constants but both sets of code should be on both slaves and masters
+// constants but kept volatile so both sets of code will be on both slaves and masters
     volatile unsigned char not_master = THIS_UNIT;         // 0 is a master, 1 is a slave.  Behaves differently with each
     volatile unsigned char not_slave = !THIS_UNIT;         // 0 is a slave, 1 is a master.
 //  variables
-    volatile unsigned char not_ready, coax_char_received, in_conversation, message_in_progress, waiting_for_coax_data,
-                sensor_ready, tamper_count, transmission_done, transmitting, time_to_phone_in, sec_interrupt,
-                sending_msg, receiving_msg, new_parameters_loaded, time_to_wakeup, urgent_alert, not_sleeping, waiting,
-                force_shut_down, wd_reset, starting_up, sensor_plugged_in, coax_buffer_full;
-
-    volatile unsigned char led_count, led_start_count, ping_count, ping_start_count;      // counts clock interrupts every eighth of a second, wakes up every 8 counts
-    volatile unsigned char bad_transmission, processing_command;     //status flags for error and ready to process
+    volatile unsigned char not_ready;
+    volatile unsigned char in_conversation;
+    volatile unsigned char message_in_progress;
+    volatile unsigned char waiting_for_coax_data;
+    volatile unsigned char sensor_ready;
+    volatile unsigned char tamper_count;
+    volatile unsigned char transmission_done;
+    volatile unsigned char transmitting;
+    volatile unsigned char time_to_phone_in;
+    volatile unsigned char sec_interrupt;
+    volatile unsigned char sending_msg;
+    volatile unsigned char receiving_msg;
+    volatile unsigned char new_parameters_loaded;
+    volatile unsigned char time_to_wakeup;
+    volatile unsigned char urgent_alert;
+    volatile unsigned char not_sleeping;
+    volatile unsigned char waiting;
+    volatile unsigned char force_shut_down;
+    volatile unsigned char wd_reset;
+    volatile unsigned char starting_up;
+    volatile unsigned char sensor_plugged_in;
+    volatile unsigned char coax_buffer_full;
     volatile unsigned int bytecount;                    // counts the number of bytes in the current received command
     volatile unsigned int received_datalength;          // max 64K?
-    volatile unsigned long int running_checksum, received_checksum; // keep a checksum to look for conversation errors
-    volatile unsigned char parameter_one, parameter_two;    // optional parameters for long commands
+    volatile unsigned long int running_checksum;
+    volatile unsigned long int received_checksum; // keep a checksum to look for conversation errors
+    volatile unsigned char parameter_one;
+    volatile unsigned char parameter_two;    // optional parameters for long commands
     volatile unsigned char command_type;    // 0 is a short command, 1 is a long command
     volatile unsigned char *data_ptr;                   // pointer to the buffer
     volatile unsigned char *message_ptr;
-    volatile unsigned char transmit_byte, last_transmit_byte;       // pointer to the message we are sending, and the byte being sent
-    volatile unsigned int message_count, message_length; // count the chars sent in the message up to the message length
-    volatile unsigned int data_count, data_length;      // count the chars sent in the data up to the data length
+    volatile unsigned char transmit_byte;
+    volatile unsigned char last_transmit_byte;       // pointer to the message we are sending, and the byte being sent
+    volatile unsigned int message_count;
+    volatile unsigned int message_length; // count the chars sent in the message up to the message length
+    volatile unsigned int data_count;
+    volatile unsigned int data_length;      // count the chars sent in the data up to the data length
     volatile unsigned char not_timed_out;                     // timeout flag
     volatile unsigned char pause;                       // flag if we are sleeping or waiting
     volatile unsigned char there_is_data;               // flag set when there is data in the buffer
@@ -710,41 +732,48 @@
     volatile unsigned char this_bank;
     volatile unsigned char this_unit;
     volatile unsigned char current_command_bank;
-    volatile unsigned char received_command_bank, received_command;
-    volatile unsigned char received_caller_bank, received_caller_unit;
-    volatile unsigned char received_recipient_bank, received_recipient_unit;
-    volatile unsigned char received_protocol; // data from the last message received
-    volatile unsigned char received_command_type;
-    volatile unsigned int  coax_tx_buff_len;          // The length of the buffer for transmitting to UCA0
-    volatile unsigned char *coax_tx_buff_ptr;        // The pointer to the transmit buffer.
-    volatile unsigned char coax_char_received;
-    volatile unsigned char interval_count;       // Clock timing.  Each interval (1/8 sec) creates an interrupt
-    volatile unsigned char interval_limit;       // The intervals are counted and counting restarts when the limit is reached.
-    volatile unsigned char wait_until_cycle;     // the interval count we are waiting for
-    volatile unsigned char timeout_during_rx ; // flags for synching
-    volatile unsigned char tx_error;            // error code for last transmission
-    volatile unsigned char error_count;
-    volatile unsigned char status;                // the status of the sensor (ready, busy, etc...)
-    volatile unsigned char connection_code;
-    volatile unsigned char suspended;               //if the sensor should not expect messages
-    volatile unsigned char intervals_on;
-    volatile unsigned char reporting_data, new_census, new_device_count, data_ready, time_to_resume;
-    volatile unsigned int  random;
-    volatile unsigned char random_wait;
-    volatile unsigned char registering;
+    volatile unsigned char received_command_bank;
+    volatile unsigned char received_command;
+    volatile unsigned char received_caller_bank;
+    volatile unsigned char received_caller_unit;
+    volatile unsigned char received_recipient_bank;
+    volatile unsigned char received_recipient_unit;
+    volatile unsigned char received_protocol;       // the protocol byte (first data byte) from the last message received
+    volatile unsigned char received_command_type;   // Part of the message protocol that determines if a command is long or short
+    volatile unsigned int  coax_tx_buff_len;        // The length of the buffer for transmitting out the coax
+    volatile unsigned char *coax_tx_buff_ptr;       // The pointer to the coax transmit buffer.
+    volatile unsigned char coax_char_received;      // The last character received over the Coax line
+    volatile unsigned char interval_count;          // Clock timing.  Each interval (1/8 sec) creates an interrupt
+    volatile unsigned char interval_limit;          // The intervals are counted and counting restarts when the limit is reached.
+    volatile unsigned char timeout_during_rx ;      // flags for deciding the timeout during synching and receiving
+    volatile unsigned char tx_error;                // error code for last transmission
+    volatile unsigned char status;                  // the current status of the slave (ready, busy, etc...)
+    volatile unsigned char connection_code;         // a value returned by the AT CREG command that indicates the connection status
+    volatile unsigned char suspended;               // a flat that indicates that the slaves should not expect messages
+    volatile unsigned char intervals_on;            // a flag to indicate if we should wake up every 1/8 sec interval
+    volatile unsigned char reporting_data;          // a flag to indicate that we are reporting data
+    volatile unsigned char new_census;              // a flag to indicate that devices were recently connected or disconnect
+    volatile unsigned char new_device_count;        // a count of how many new devices were recently
+    volatile unsigned char data_ready;              // a flag to indicate that there is data ready to report using the phone
+    volatile unsigned char time_to_resume;          // a flag to indicat that is time to end suspend mode
+    volatile unsigned int  random;                  // a random number used by the random timer to wait a random amount of time
+    volatile unsigned char registering;             // flag that we are trying to register, reset when some other device gets there first
     volatile unsigned int  last_temperature;        // the last temperature reading
+    volatile unsigned int  day_of_year;             // the number of days elapsed so far this year
+    volatile unsigned int  last_report_day;         // the day of the year the last report was sent
+    volatile unsigned int  report_number;           // the number of the report for today (starts at 1)
 
-
-#define SENSOR_SLOTS 0x30   // start out seeing
-
+#define SENSOR_SLOTS 0x30   // start out with 48 intervals and 48 slots
      unsigned char slot_count;                      // a counter to find slots
-     unsigned char sensor_slot[SENSOR_SLOTS];       //0 = empty, 1 = taken, 2 = suspended
+     unsigned char sensor_slot[SENSOR_SLOTS];       // 0 = empty, 1 = taken, 2 = suspended
+     unsigned char sensor_ids[SENSOR_SLOTS][9];     // sensor serial numbers in each slot (or most recent ID)
      unsigned char sensor_status[SENSOR_SLOTS];     // 0 = no unreported change, 1 = recently connected, 2 = recently disconnected
+//// Sensor Status Values ////
 #define NO_UNREPORTED_CHANGE 0
 #define RECENTLY_CONNECTED 1
 #define RECENTLY_DISCONNECTED 2
 #define NEW_PARAMETERS_FOUND 3
-     unsigned char sensor_ids[SENSOR_SLOTS][9];     //sensor serial numbers in each slot (or most recent ID)
+
      unsigned char device_count;                    // the number of devices connected to the master
      unsigned int battery_level;                    // 0 = battery dead, 100 = fully charged
      unsigned int battery_percents[2][36];// = {
@@ -994,20 +1023,21 @@ unsigned char new_parameters[40]= {
             "RESET OCCURRED.\r",            // messages[61]
             "CONNECTED - MONITORING.\r",    // messages[62]
             "DISCONNECTED.\r",              // messages[63]
-            "# ,Energy, Max, Wet,Temp,   X,   Y,   Z, Max,ODR2,ODR3,ODR4,ODR5,ODR6", // messages[64]
+            "# ,Temp, Wet,   X,   Y,   Z,", // messages[64]
             "NEST DATA LOADED",             // messages[65]
             " ",                            // messages[66]
-            "Energy samples per second (ODR): ",    // messages[67]
+            "Energy samples/sec. (ODR):  ", // messages[67]
             "ALL\r",        // messages[68]
-            "12.5",         // messages[69]
-            " 25",          // messages[70]
-            " 50",          // messages[71]
-            "100",          // messages[72]
-            "200",          // messages[73]
-            "400",          // messages[74]
+            " 400",         // messages[69]
+            " 200",         // messages[70]
+            " 100",         // messages[71]
+            "  50",         // messages[72]
+            "  25",         // messages[73]
+            "12.5",         // messages[74]
             "SENSOR_LOG_",  // messages[75]
             "ACTIVITY_LOG_",// messages[76]
-            "EVENT: "       //messages[77]
+            "EVENT: ",      // messages[77]
+            " Min, Max"     // messages[78]
             };
                                     // If the command is complete it ends with a CR (\r)
 
@@ -1082,12 +1112,12 @@ unsigned char new_parameters[40]= {
 #define TXT_66              66  //
 #define TXT_ENERGY_SAMPLES  67  //  "Energy samples per second (ODR): "
 #define TXT_ALL             68  //  "ALL\r"
-#define TXT_12              69  //  "12.5"
-#define TXT_25              70  //  "25"
-#define TXT_50              71  //  "50"
-#define TXT_100             72  //  "100"
-#define TXT_200             73  //  "200"
-#define TXT_400             74  //  "400"
+#define TXT_400             69  //  " 400"
+#define TXT_200             70  //  " 200"
+#define TXT_100             71  //  " 100"
+#define TXT_50              72  //  "  50"
+#define TXT_25              73  //  "  25"
+#define TXT_12              74  //  "12.5"
 #define TXT_SENSOR_LOG      75  //  "SENSOR_LOG_"
 #define TXT_ACTIVITY_LOG    76  //  "ACTIVITY_LOG_"
 #define TXT_EVENT           77  //  "EVENT: "
@@ -1132,7 +1162,7 @@ unsigned char new_parameters[40]= {
             DATE_TODAY, CR,
             TODAYS_NUM, CR,                   // Report Heading (report version)
             COMM_ID, CR,                    // Report Heading (IDs and Installation date)
- //           NEST_LATITUDE, COMMA, NEST_LONGITUDE, CR,   // Report Heading (nest GPS location)
+//            NEST_LATITUDE, COMMA, NEST_LONGITUDE, CR,   // Report Heading (nest GPS location)
             START_TIME, CR,
             REPORT_TIME, CR,               // Report Heading (Timings: start, end, and interval)
             END_OF_SCRIPT
@@ -1202,6 +1232,7 @@ unsigned char new_parameters[40]= {
     unsigned int z;             //all purpose 2 byte
 
     static const char days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    static const int days_total[] ={0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334} ;
                                 // used to calculate elapsed days
     static const unsigned int powers_of_10[] = { 1, 10, 100, 1000, 10000};
                                 // used for coverting HEX to ASCII
@@ -1826,10 +1857,10 @@ void makeConnection(void)
     while ( (connection_code != CELL_REGISTERED) && (connection_code !=ROAMING) )   // added roaming
         // Keep trying until there is a connection
     {
-        wait_a_sec(1);                   // wait a second before trying again
+        wait_a_sec(1);              // wait a second before trying again
         reset_phone_UART();         // reset the UART if that is the problem
         sendMessage(AT_CREG);       // Send AT code to request a registration report
-    }                                       // TODO // better error handling!
+    }                               // TODO // better error handling!
 }
 
 
@@ -1840,11 +1871,11 @@ void int2ascii(unsigned int number, unsigned char *char_string, unsigned char of
     power_count = string_length - 1;                    // start with the highest power of ten
     if (number >= powers_of_10[string_length]) return;  // a 4 character int must be less than 10 to the 4th power.
     for (string_count = 0; string_count < string_length; string_count++ )   // start with the leftmost character
-    {   test_chars[string_count] = 0x30;
-        while(number >= powers_of_10[power_count])
-        {   test_chars[string_count]++ ;
-            number -= powers_of_10[power_count];        //start the char at hex30, increment it for every
-        }                                               // power of ten subtracted from the number
+    {   test_chars[string_count] = 0x30;                // Start with zero in ASCII
+        while(number >= powers_of_10[power_count])      // As long as the number is greater or equal to the place value we're checking
+        {   test_chars[string_count]++ ;                // increment the ASCII
+            number -= powers_of_10[power_count];        // subtract the power of 10 from our number
+        }
         power_count--;                                  // do this for all the digits
     }
     move_string(test_chars, 0, string_length, char_string, offset);  // move temporary string back to substring specified;
@@ -1870,8 +1901,10 @@ unsigned int ascii2int(unsigned char *char_string, unsigned char offset, unsigne
     // set the RTC from the cell tower
     // TODO // Save day and report count on sensor so that the numbers continue if the comm tower is swapped
 void set_time(void)
-{   //unsigned int start_day, current_day;
-    //unsigned int start_month, current_month;
+{// unsigned int start_day;
+    unsigned int current_day;
+ // unsigned int start_month;
+    unsigned int current_month;
     move_string(messages[REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
     reset_phone_UART();                                         // empty the buffers
     sendMessage(AT_GET_TIME);                                   // request network time
@@ -1879,12 +1912,12 @@ void set_time(void)
     move_string(incoming.uart, 8, 2, messages[DATE_TODAY], 2);// move the year
     move_string(incoming.uart, 11, 2, messages[DATE_TODAY], 5);// move the month
     move_string(incoming.uart, 14, 2, messages[DATE_TODAY], 8);// move the day
-    /*
-    start_month =  ascii2int(messages[INSTALLED], 5, 2);        // convert 2 ASCII month chars to a single byte
-    start_day =  ascii2int(messages[INSTALLED], 8, 2);          // convert 2 ASCII day chars to a single byte
+//    start_month =  ascii2int(messages[INSTALLED], 5, 2);        // convert 2 ASCII month chars to a single byte
+//    start_day =  ascii2int(messages[INSTALLED], 8, 2);          // convert 2 ASCII day chars to a single byte
     current_month = ascii2int(messages[REPORT_TIME], 5, 2);     // convert 2 ASCII month chars to a single byte
     current_day = ascii2int(messages[REPORT_TIME], 8, 2);       // convert 2 ASCII day chars to a single byte
-
+    // Phase II calculation
+    /*
     if (start_month == current_month) day_count = current_day-start_day+1;  // the case of the same month
     else
     {   day_count = days_in_month[start_month] - start_day + 1;
@@ -1897,6 +1930,13 @@ void set_time(void)
     }
     int2ascii(day_count, messages[DAYS_NUM], 0, 3);           //put the count into the string
     */
+    // Phase III calculation
+    day_of_year = current_day + days_total[current_month];                        // start out with the number of days so far this month
+    if (day_of_year == last_report_day)
+        report_number++ ;
+    else
+        report_number = 1;
+    int2ascii(report_number, messages[TODAYS_NUM], 0, 2);
 }
 
 
@@ -2280,13 +2320,13 @@ void ADXL_FifoRead(void)
         temp = UCA1RXBUF ;      // empty the recieved buffer
     }
     for( x = 0; x < DATA_BUFFER_SIZE-1; x++ )     // Fill up the buffer with the data from the stack.  The first is junk
-    {   while(ADXL_TX_NOT_READY) ;        // wait for the TX buffer to empty
+    {   while(ADXL_TX_NOT_READY) ;     // wait for the TX buffer to empty
         ADXL_TX_BUFF= 0xFF;            // Send another dummy byte to push data off the stack
-        incoming.spi[x] = UCA1RXBUF; // get the byte from the previous send
-        while(ADXL_TX_NOT_READY) ;        // wait for the TX buffer to empty
-        ADXL_TX_BUFF= 0xFF;            // Send another dummy byte to push data off the stack
-        temp = UCA1RXBUF ;
-        incoming.spi[x] |= (temp<<8) ;   //  add the second byte * 256
+        incoming.spi[x] = UCA1RXBUF;   // get the byte from the previous send
+        while(ADXL_TX_NOT_READY) ;     // wait for the TX buffer to empty
+        ADXL_TX_BUFF= 0xFF;            // Send another dummy byte to push the next data off the stack
+        temp = UCA1RXBUF ;             // get the byte that just finished
+        incoming.spi[x] |= (temp<<8) ; //  add the second byte * 256
     }
     while(ADXL_TX_NOT_READY) ;    // wait for SPI module to finish up
     temp = UCA1RXBUF;   // get the last byte
@@ -2531,12 +2571,16 @@ void ADXL_power_cycle(void)
     p4save[2] = P4DIR;  // Port 4 Resistor Enable Register */
     // Stop sending power to any of the SPI pins by setting the appropriate pins low on P2
     // The ADXL chip can only be reset if there is no voltage on ANY pin.
-    P2OUT = P4OUT = 0;      // Port 2 and 4 Port Select Register 1
-    P2SEL1 = P2SEL1 = 0;     // Port 2 and 4 Port Select Register 1
-    P2DIR = P2DIR = 0xFF;   // Port 2 and 4 Direction Register (all outputs)
+    P2OUT &= ~(BIT3|BIT4|BIT5|BIT6);   // set the output low for all the ADXL SPI pins
+    P4OUT &= ~(BIT0|BIT1);             // zero the ADXL interrupt pins
+    P2DIR |= (BIT3|BIT4|BIT5|BIT6);    // Port 2 Direction Register (all outputs)
+    P4DIR |= (BIT0|BIT1);              // Port 4 Direction Register (all outputs)
+    P2SEL1 &= ~(BIT3|BIT4|BIT5|BIT6);  // zero the Port 2 Port Select Register 1
+    P4SEL1 &= ~(BIT0|BIT1);            // zero the Port 4 Port Select Register 1
+
     // Turn off power to the ADXL and reset it
     ADXL_POWER_OFF;           // Setting the pin low turns off the sensor
-    wait(100);                           //  Wait 100 msec. was 50
+    wait(100);                //  Wait 100 msec. was 50
     // This may be more time than necessary,
     // but it needs to be long enough that the voltage goes to zero.
     // Then turn the ADXL back on
@@ -2547,7 +2591,7 @@ void ADXL_power_cycle(void)
     P4OUT = p4save[0];  // Port 4 Port Select Register 1 */
     P4SEL1 = p4save[1]; // Port 4 Direction Register */
     P4DIR = p4save[2];  // Port 4 Resistor Enable Register */
-    ADXL_POWER_ON ;     // turn it on by setting the bit high
+    ADXL_POWER_ON ;     // Confirm that it is on by setting the bit high (it may already have been on)
     wait(50);           // wait 50 ms, was 20 ms (sensor spec'd for 5)
 }
 
@@ -3519,11 +3563,11 @@ void common_startup(void)
 // receives commands from  the master and collects, processes and transmits data
 //
 void slave()
-{ unsigned char temp = error_count = 0;
+{ unsigned char temp = 0;
     slave_settings();               // Settings without using GRACE
     common_startup();               // Configuration settings common to both MASTER and SLAVE
     STOP_INTERVAL_TIMER;            // stop the timer for now
-    wait(512);                      // wait 1 second
+    wait(512);                      // wait 1/2 a second
     generate_random(11);            // creates a random number between 0 and 4095
     slave_registered = NO;          // flag that slave is not registered
     status = READY;                 // TODO// this might not get reset after a power failure
@@ -3596,7 +3640,7 @@ void slave()
             default:
             // This only happens during the registered interval if not suspended
             if (interval_count == this_unit)
-            {   //temp = coax_short_message(interval_count);
+            {
                 if ( (receive_message())                      // receive a message and there was no error
                     && (received_command == STATUS) )  // and the reply is what was expected
                          temp = coax_short_message(READY);
@@ -3681,7 +3725,8 @@ void master()
                 wait_for_last_cycle();          // wait until the last interval
             }
             else if (data_ready)       //
-            {   coax_short_message(SUSPEND);
+            {
+                coax_short_message(SUSPEND);
                 phone_on();
                 // wake up the units with data one by one
                 // upload the data
@@ -3692,27 +3737,31 @@ void master()
                 wait_for_last_cycle();
             }
             else if (time_to_wakeup)
-            {   coax_short_message(WAKE_UP);
+            {
+                coax_short_message(WAKE_UP);
                 time_to_wakeup = NO;
             }
             else if (register_device())
-            {   GREEN_LED_ON;
+            {
+                GREEN_LED_ON;
                 new_device_count ++;
                 unable_to_register_count = 0;
             }
-            else if ( (++unable_to_register_count >5) && (new_device_count))
-                new_census = YES; // flag that we are done registering new devices
+            else if (unable_to_register_count < REGISTRATION_WAIT)
+                unable_to_register_count++; // wait some more before reporting
+            else if (new_device_count)     // if all else fails and enough time has elapsed
+                new_census = YES;           // flag that we are ready to report status changes
 
   // Reports new connections after there is no further response
   // All phone communications are set up during this interval.  All the sensors are put into suspend mode,
   // meaning that they listen for commands during interval one and don't disconnect if there isn't
   // a handshake during their own interval. The sensors all upload data during the 6 second cycle, which is more than
   // time to upload or download 64K of code or data (probably won't need close to that)
-  // All the sensors keep synching during interval 0 and listen during slot one to see which sensor will be activated.
+  // All the sensors stop synching during interval 0 and listen during slot one to see which sensor will be activated.
   // 10 sensors a minute can be processed.  Once the cell call is complete the master releases the suspend command
   // during interval one with a global wake-up command.
   // All devices report their data if any one of them is ready to report.  Therefore, the device that is set to report
-  // most frequently will determine the frequency that all devices report.
+  // most frequently will determine the frequency at which all devices will report.
 
         }
         else if (device_count)       // if devices are connectd
@@ -3729,7 +3778,7 @@ void master()
                     {   sensor_slot[going_to_unit]= NO; // deregisiter whatever sensor was there
                         sensor_status[going_to_unit]= RECENTLY_DISCONNECTED;
                         device_count--;                 // one less device
-                        new_census = YES;               // flag that we new to report the removal of devices
+                        new_census = YES;               // flag that we need to report the removal of devices
                         tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
                         RED_LED_ON;                     // long red led blink indicates disconnection
                      }
