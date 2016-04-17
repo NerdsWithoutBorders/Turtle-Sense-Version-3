@@ -19,7 +19,7 @@
 
 #define MASTER 0
 #define SLAVE  1
-#define THIS_UNIT MASTER
+#define THIS_UNIT SLAVE
 
 /*
        /////////////////////////////////////////////////////////////////////////////////////////////
@@ -60,8 +60,8 @@
 
        // REMEMBER TO CHECK THE FTP LOG-IN CREDENTIALS IN THE FOLLOWING TWO LINES!!!!
 
-#define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
 #define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
+#define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
 
 
 #define USER_PASSWORD "ABCDEFGH"  // 8 character password needed for program or parameter downloads.  Recompile with a different password.
@@ -72,12 +72,12 @@
 
 // The following is only necessary for compiling a SMART SENSOR slave
        // SMART SENSOR IDENTIFICATION
-#define NEST_ID "123456.000,060914,M-AA0002"
+#define NEST_ID "123456.000,060914,S-AA0003"
        // The last 6 digits is a unique serial number for each smart sensor.
        // Update the last 6 digits before compiling for each new device.
        // The rest of the data will be updated during each new registration with a master
        // What you see here is just an example of what it could look like
-#define SERIAL_NUMBER "M-AA0002"   // Unique serial number for each device.  Update before compiling for a new device
+#define SERIAL_NUMBER "S-AA0003"   // Unique serial number for each device.  Update before compiling for a new device
 #define SERIAL_ID_LEN   8          // length of serial number string (don't change without changing all the places this is used)
        // PHASE THREE SERIAL NUMBER TEMPLATES
        // M-AA####  -- Master device
@@ -1289,12 +1289,18 @@ unsigned char new_parameters[40]= {
     volatile unsigned int integration_min[7];           // The minimum integration reading so far in this record for each ODR
     volatile unsigned char sample_offset;               // a recycling counter from 0 to 31 for counting samples
                                                         // used in the following arrays
-    const unsigned char odr_order[32]    =   {5, 1, 2,1, 3,1,2,1, 4,1,2,1,3, 1, 2, 1, 6, 1, 2, 1, 3, 1, 2, 1,4, 1, 2, 1, 3, 1, 2, 1} ;
+    const unsigned char odr_order[32] = { 5, 1, 2, 1, 3, 1, 2, 1,
+                                          4, 1, 2, 1, 3, 1, 2, 1,
+                                          6, 1, 2, 1, 3, 1, 2, 1,
+                                          4, 1, 2, 1, 3, 1, 2, 1} ;
         // which ODR (except the 400 sample speed) we add the sum of the squares of the differences
         // ODRs:  0 = 400,  1 = 200,  2 = 100,  3 = 50,  4 = 25,  5 = 12.5,  6 = 12.5 (not needed)
         // This assumes that the ODR for the ADXL chip is set at 400 samples per second.
         // for other speeds: 0 = the set output data rate (ODR), 1 = ODR/2,  2 = ODR/4, etc...
-    const unsigned char old_odr_sample[32] = {0,31,30,1,28,3,2,5,24,7,6,9,4,11,10,13,16,15,14,17,12,19,18,21,8,23,22,25,20,27,26,29} ;
+    const unsigned char old_odr_sample[32] = { 0,31,30, 1,28, 3, 2, 5,
+                                              24, 7, 6, 9, 4,11,10,13,
+                                              16,15,14,17,12,19,18,21,
+                                               8,23,22,25,20,27,26,29 } ;
         // which stored sample in the array to compare with
     volatile unsigned char odr_rate_on[7] = { YES, YES, YES, YES, YES, YES, NO} ;
         //determine whether to include into ODR integration. They all start on.
@@ -2487,8 +2493,8 @@ void process_bin_data(void)
 void integrate_data(void)
 {   unsigned int x;
     signed int tempX, tempY, tempZ; // temp values
-    signed int aX, aY, aZ;          // value of accelerometer for each coordinate
-    signed int dX, dY, dZ;          // difference values for each coordinate
+    signed int acc_x, acc_y, acc_z;          // value of accelerometer for each coordinate
+    signed int dif_x, dif_y, dif_z;          // difference values for each coordinate
     unsigned long int d_squared;    // The sum of the squares of dx, dy and dz
     unsigned char old_offset;       // where to look in the tables for the old data
     unsigned char offset;           // the offset of a data element when storing in a record
@@ -2510,19 +2516,19 @@ void integrate_data(void)
                 ((tempY & XYZ_PINS) == Y_READING) &&
                 ((tempZ & XYZ_PINS) == Z_READING) )     // process only non-zero readings
         {        // make the data proper 16 bit integers
-            aX= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
-            aY= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
-            aZ= (tempZ & ADXL_MASK) | ((tempZ & NEG_MASK)<<2);
+            acc_x= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
+            acc_y= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
+            acc_z= (tempZ & ADXL_MASK) | ((tempZ & NEG_MASK)<<2);
                  // integrate the data for multiple ODRs
             if ( not_first_read )       // skip the first reading, nothing to subtract!
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
                 old_offset = (sample_offset + 0x1F) & 0x1F ; // subtract 1, but 0 becomes 0x1F
-                dX= (aX - aXold[old_offset]);           // compute the differences
-                dY= (aY - aYold[old_offset]);
-                dZ= (aZ - aZold[old_offset]);
+                dif_x= (acc_x - aXold[old_offset]);           // compute the differences
+                dif_y= (acc_y - aYold[old_offset]);
+                dif_z= (acc_z - aZold[old_offset]);
                 // sum the square of the differences for the highest data rates
-                d_squared  = square(dX) + square(dY) + square(dZ);
+                d_squared  = square(dif_x) + square(dif_y) + square(dif_z);
                 // see if it is more than the reportable max
                 if (d_squared > 0xFFFF) max_d_squared = 0xFFFF;                  // if it is save 0xFFFF as the max
                 else if (d_squared > max_d_squared) max_d_squared = d_squared;    // otherwise, see if it is a new max
@@ -2534,10 +2540,10 @@ void integrate_data(void)
                     && ( (old_offset = old_odr_sample[sample_offset]) < e_sample_count) );
                 // skip if we don't care about that sample rate or there is no old sample to compare to
                 {   // for the other data rates, each of the 32 samples looks at a different stored sample
-                    dX= (aX - aXold[old_offset]);           // compute the differences for other data rates
-                    dY= (aY - aYold[old_offset]);
-                    dZ= (aZ - aZold[old_offset]);
-                    e_integrated[other_odr] += square(dX) + square(dY) + square(dZ);
+                    dif_x= (acc_x - aXold[old_offset]);           // compute the differences for other data rates
+                    dif_y= (acc_y - aYold[old_offset]);
+                    dif_z= (acc_z - aZold[old_offset]);
+                    e_integrated[other_odr] += square(dif_x) + square(dif_y) + square(dif_z);
                     // sum the square of the differences and add to the corresponding accumulators for the other rates
                 }
             }
@@ -2554,14 +2560,14 @@ void integrate_data(void)
                 e_sample_limit = 0x0001 <<( e_sample_bits + 8);
             // Save the first reading off the stack in the orientation log
             // TODO // make this an average reading and store elswhere!
-                data.bins[recCount][X_POS] = aX;
-                data.bins[recCount][Y_POS] = aY;
-                data.bins[recCount][Z_POS] = aZ;
+                data.bins[recCount][X_POS] = acc_x;
+                data.bins[recCount][Y_POS] = acc_y;
+                data.bins[recCount][Z_POS] = acc_z;
             }
             // save the reading for next time in aXold, aYold, and aZold
-            aXold[sample_offset] = aX;
-            aYold[sample_offset] = aY;
-            aZold[sample_offset] = aZ;
+            aXold[sample_offset] = acc_x;
+            aYold[sample_offset] = acc_y;
+            aZold[sample_offset] = acc_z;
             sample_offset = ((sample_offset + 1) & 0x1F );      // cycle from 0 to 31, 32 becomes 0
             e_sample_count++;    // keep track of how many samples have been added to the fastest ODR integration
             // finish up a record if we've reached the limit
@@ -2596,9 +2602,10 @@ void integrate_data(void)
                 }
                 not_first_read = FALSE ;    // starting a new integration so we just store the first reading
             }
+            x += 3;             // process the next set of 3
         }
         else                    // once we hit zeros we're done.
-        x = DATA_BUFFER_SIZE;   // skip over the rest of the data buffer, there is no more data
+            x = DATA_BUFFER_SIZE;   // skip over the rest of the data buffer, there is no more data
     }
 }
 
