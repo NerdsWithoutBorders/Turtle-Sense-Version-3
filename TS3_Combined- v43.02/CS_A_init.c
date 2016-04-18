@@ -55,9 +55,9 @@ void CS_A_graceInit(void)
     CS_clockSignalInit(CS_MCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
 
     /*
-     * Setting SMCLK source from CS_DCOCLK_SELECT with the divider of CS_CLOCK_DIVIDER_1.
+     * Setting SMCLK source from CS_DCOCLK_SELECT with the divider of CS_CLOCK_DIVIDER_4.
      */
-    CS_clockSignalInit(CS_SMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
+    CS_clockSignalInit(CS_SMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_4);
 
     /*
      * Setting ACLK source from CS_LFXTCLK_SELECT with the divider of CS_CLOCK_DIVIDER_1.
@@ -65,9 +65,9 @@ void CS_A_graceInit(void)
     CS_clockSignalInit(CS_ACLK, CS_LFXTCLK_SELECT, CS_CLOCK_DIVIDER_1);
 
     /*
-     * Set DCO frequency to 1000000 Hz
+     * Set DCO frequency to 4000000 Hz
      */
-    CS_setDCOFreq(CS_DCORSEL_0, CS_DCOFSEL_0);
+    CS_setDCOFreq(CS_DCORSEL_0, CS_DCOFSEL_3);
 
     /*
      * Clears all oscillator fault flags including global oscillator fault flag
@@ -91,21 +91,18 @@ void CS_A_graceInit(void)
     CS_disableClockRequest(CS_ACLK);
 
     /* USER CODE START (section: CS_A_graceInit_epilogue) */
-    /* User code */
-    /*
-     * MCLK clock request enable. Setting this enables conditional module requests for MCLK
-     */
-    CS_enableClockRequest(CS_MCLK);
+    /* MCLK clock request enable. Setting this enables conditional module requests for MCLK
+    */
+   CS_enableClockRequest(CS_MCLK);
 
-    /*
-     * SMCLK clock request enable. Setting this enables conditional module requests for SMCLK
-     */
-    CS_enableClockRequest(CS_SMCLK);
+   /*
+    * SMCLK clock request enable. Setting this enables conditional module requests for SMCLK
+    */
+   CS_enableClockRequest(CS_SMCLK);
 
-    /*
-     * ACLK clock request enable. Setting this enables conditional module requests for ACLK
-     */
-    CS_enableClockRequest(CS_ACLK);
-
+   /*
+    * ACLK clock request enable. Setting this enables conditional module requests for ACLK
+    */
+   CS_enableClockRequest(CS_ACLK);
     /* USER CODE END (section: CS_A_graceInit_epilogue) */
 }

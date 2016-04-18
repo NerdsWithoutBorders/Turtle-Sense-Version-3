@@ -483,8 +483,12 @@
     #define ODR_400    (BIT2|BIT0)  // 400 Hz ODR
 
 
-#define SAMPLE_SPEED    ODR_100 // Output Data Rate (see above)
-
+#define SAMPLE_SPEED    ODR_400 // base Output Data Rate (see above)
+#define ODR_RATES       0x3F    // bit0 is the base rate, but is ignored because the base is always calculated
+                                // bit1 = base/2, bit2 = base/4, bit3 = base/8, etc...
+                                // if base is 400Hz, bit1 = 200Hz, bit2 = 100hz, etc...
+    // the default is that all rates are calculated, but it takes twice as much power.
+    // to process a single ODR, set the sample speed to the desired ODR and set ODR_RATES to 0
 
 /// version two definitions -- might not be needed
 #define READ_SPEED      1       // the number of sets of buffer reads per second.
@@ -630,8 +634,8 @@
 
 ////////////// PROGRAM TIMINGS ///////////////////////////
     // Default timings  (You can change these)
-#define HOURS                4  // Default is 4  // Number of hours for data collection per call-in period once motion detected.  This must be a factor of 120.
-#define SLOWHOURS           24  // Default is 24 // Number of hours in a slow day of data collection
+#define HOURS                1  // Default is 4  // Number of hours for data collection per call-in period once motion detected.  This must be a factor of 120.
+#define SLOWHOURS            1  // Default is 24 // Number of hours in a slow day of data collection
 #define SLOW_DAYS           40  // Number of days that should elapse until there is more frequent reporting
 #define INTERVALS           48  // the total number of 1/8 second intervals (6 seconds total)
 #define REGISTRATION_WAIT    5  // Number of (6 second) loops to wait before reporting status changes of connected devices
@@ -645,7 +649,7 @@
 #define MAX_BIN             10  // number of histogram bins kept in each record (changing this might cause problems -- check thoroughly)
 #define DATA_SIZE           16  // This is MAX_BIN plus other parameters (currently 6: Temp, X, Y, Z, Count, Max)
 #define DATA_BYTES          32  // The number of bytes in one record (DATA_SIZE * 2)
-#define MAX_RECORDS         48  // The default is 240 // The maximum number of Bin records assuming about 8 K and 32 bytes per record
+#define MAX_RECORDS          2  // The default is 240 // The maximum number of Bin records assuming about 8 K and 32 bytes per record
 #define FRACTIONAL_BITS      8  // The number of bits for each ODR that is the fractional part of the number.
                                 // For example if the reported amount is 0xA34E, set at 8 the fractional portion is "4E" = 0x004E/0x0100
 
@@ -672,6 +676,8 @@
 #define SLOWBIN_LO (SLOWHOURS_BIN_SEC & 0x00FF) // The low byte of SLOWHOURS_BIN_SEC
 #define MAX_RECORDS_HI ((MAX_RECORDS & 0xFF00) / 0x0100)    // The high byte of MAX_RECORDS
 #define MAX_RECORDS_LO  (MAX_RECORDS & 0x00FF)  // The low byte of MAX_RECORDS
+#define SAMPLE_BITS     4   // The power of two for the number of samples to integrate
+                            // also used to bitshift the result to divide for an average reading
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -852,8 +858,10 @@ unsigned char parameters[40] = {
         BINSEC_LO, BINSEC_HI,           // parameters[26] and [27] timing settings for active days
         SLOW_DAYS,                      // parameters[28] - Number of days of low activity
         SLOWBIN_LO, SLOWBIN_HI,         // parameters[29] and [30] - The number of seconds to accumulate readings in each record (set of bins)
-        LOAD_PARAMETERS_TRIES,          // parameters 31] - the number of times we try to load new parameters (must be 1 or more)
-        0,0,0,0,0,0,0,0 };              // parameters[32] to [39] reserved for future use
+        LOAD_PARAMETERS_TRIES,          // parameters[31] - the number of times we try to load new parameters (must be 1 or more)
+        SAMPLE_BITS,                    // parameters[32] - the power of two for integration samples to accumulate (also used to bit shift for an average)
+        ODR_RATES,                      // parameters[33] - which ODR rates are being calculated bit0 = base rate, bit1 is base/2, bit2 is base/4, etc.
+        0,0,0,0,0,0 };                  // parameters[34] to [39] reserved for future use
 #define PARAM_BYTES 40 // the number of bytes in the parameters structure above
      // new parameters can be ftp'd into the unit from the web
 unsigned char new_parameters[40]= {
@@ -872,7 +880,9 @@ unsigned char new_parameters[40]= {
         SLOW_DAYS,
         SLOWBIN_LO, SLOWBIN_HI,
         LOAD_PARAMETERS_TRIES,
-        0,0,0,0,0,0,0,0 };
+        SAMPLE_BITS,
+        ODR_RATES,
+        0,0,0,0,0,0 };
 
 #define PARAM_THRESH_ACT_L      parameters[0]
 #define PARAM_THRESH_ACT_H      parameters[1]
@@ -905,6 +915,9 @@ unsigned char new_parameters[40]= {
 #define PARAM_SLOW_DAYS         parameters[28]
 #define PARAM_SLOWBIN_LO        parameters[29]
 #define PARAM_SLOWBIN_HI        parameters[30]
+#define PARAM_LOAD_TRIES        parameters[31]
+#define PARAM_SAMPLE_BITS       parameters[32]
+#define PARAM_ODR_RATES         parameters[33]
 
 #define NEW_THRESH_ACT_L      new_parameters[0]
 #define NEW_THRESH_ACT_H      new_parameters[1]
@@ -937,7 +950,9 @@ unsigned char new_parameters[40]= {
 #define NEW_SLOW_DAYS         new_parameters[28]
 #define NEW_SLOWBIN_LO        new_parameters[29]
 #define NEW_SLOWBIN_HI        new_parameters[30]
-
+#define NEW_LOAD_TRIES        new_parameters[31]
+#define NEW_SAMPLE_BITS       new_parameters[32]
+#define NEW_ODR_RATES         new_parameters[33]
 
 ////////////////////////////////////////////////////////
 ////////////   REPORT GENERATION   /////////////////////
@@ -1242,7 +1257,9 @@ unsigned char new_parameters[40]= {
     #define Y_POS       2
     #define Z_POS       3
     #define READINGS    4
+    #define MOISTURE    4
     #define HIGHEST_BIN 5
+    #define PEAK_DIF    5
     #define BINS        6          // The first bin stored
     #define TOP_ODR_POSITION 6
     #define JOLT_BINS   25
@@ -1302,7 +1319,7 @@ unsigned char new_parameters[40]= {
                                               16,15,14,17,12,19,18,21,
                                                8,23,22,25,20,27,26,29 } ;
         // which stored sample in the array to compare with
-    volatile unsigned char odr_rate_on[7] = { YES, YES, YES, YES, YES, YES, NO} ;
+    volatile unsigned char odr_rate_on[7] ;
         //determine whether to include into ODR integration. They all start on.
         //#6 is the same as #5 so it is off.
     volatile unsigned char fractional_bits = FRACTIONAL_BITS;   // The number of bits that will be the fractional portion
@@ -1311,8 +1328,8 @@ unsigned char new_parameters[40]= {
         // assuming the ODR is 400  Minimum is 0, maximum is 15, but numbers that high are probably not practical
         // The result will be a char for the integer portion of the average, and a char for the fractional portion (1/256)
         // The maximum average is just 256, which for turtles is just fine.  This might need adjustments for other applications
-        // in which case you'd change FRACTIONAL_BITS from its default value of 4.
-        //For other ODRs:
+        // in which case you'd change FRACTIONAL_BITS from its default value of 8.
+        // Subtract the following from the e_sample_bits column for other ODRs:
         // -5 for 12.5 Hz, -4 for 25, -3 for 50,  -2 for 100,  -1 for 200
         // e_sample_bits   12.5  25     50    100       200     400     Time
         //   0              8    16     32     64      128     256      ~.64 seconds
@@ -1987,7 +2004,7 @@ void get_new_parameters(void)
     unsigned char *message_ptr;                     // pointer to sensor ID
     unsigned char datacount;                        // counter for file data
     unsigned char bad_checksum = TRUE;              // flag for checksum results
-    for (tries = 1; bad_checksum && (tries<LOAD_PARAMETERS_TRIES +1) ; tries++) // trying just once, but multiple tries are possible
+    for (tries = 1; bad_checksum && (tries<PARAM_LOAD_TRIES +1) ; tries++) // trying just once, but multiple tries are possible
     {   wait(980);  // pause between tries
         message_ptr = messages[SENSOR_ID];          // point to the sensor ID
         do_script(read_parameters);                 // download the file
@@ -2369,17 +2386,26 @@ void ADXL_FifoRead(void)
     ADXL_DESELECT;           // deselect
 }
 
+
+// read the capacitive moisture sensor
+unsigned int read_moisture(void)
+{
+    return(0xAA);
+}
+
+
 signed int read_temperature(unsigned char temp_readings)
 // Get a temperature reading
 // temp_readings is the power of two number of readings
 // 0 = 1 reading, 1 = 2 readings, 2 = 4 readings, 3 = 8 readings
-// maximum is 0x0F = 32K readings
+// 4 = 16 readings 5 = 32 readings
+// maximum is 0x05 = 32 readings.  More than that would take too much time
 {
     volatile unsigned int temp, temp1, temp2;
     volatile long int temp_temp;        // temporary temperature reading
     unsigned int readings = 0x01;       // start off with one reading (if temp_readings is zero)
     unsigned char temp_bits;            // this will be the number of bits to rotate to divide the accumulation
-    if (temp_readings > 0x0F) temp_readings = 0x0F;    // 15 maximum
+    if (temp_readings > 0x05) temp_readings = 0x05;    // 5 maximum (32 readings)
     temp_bits = temp_readings;          // start out the same
     while (temp_readings)               // as long as this is positive
     {
@@ -2491,10 +2517,10 @@ void process_bin_data(void)
 // The default is just over 10 seconds per integration.  The highest and lowest value are reported in each record.
 // The default record size is 30 minutes.
 void integrate_data(void)
-{   unsigned int x;
+{   unsigned int x;                 //counter
     signed int tempX, tempY, tempZ; // temp values
-    signed int acc_x, acc_y, acc_z;          // value of accelerometer for each coordinate
-    signed int dif_x, dif_y, dif_z;          // difference values for each coordinate
+    signed int acc_x, acc_y, acc_z; // value of accelerometer for each coordinate
+    signed int dif_x, dif_y, dif_z; // difference values for each coordinate
     unsigned long int d_squared;    // The sum of the squares of dx, dy and dz
     unsigned char old_offset;       // where to look in the tables for the old data
     unsigned char offset;           // the offset of a data element when storing in a record
@@ -2563,6 +2589,8 @@ void integrate_data(void)
                 data.bins[recCount][X_POS] = acc_x;
                 data.bins[recCount][Y_POS] = acc_y;
                 data.bins[recCount][Z_POS] = acc_z;
+                data.bins[recCount][TEMPS] = read_temperature(3); //average 8 temperature readings
+                data.bins[recCount][MOISTURE] = read_moisture();  // save the moisture reading
             }
             // save the reading for next time in aXold, aYold, and aZold
             aXold[sample_offset] = acc_x;
@@ -2573,6 +2601,8 @@ void integrate_data(void)
             // finish up a record if we've reached the limit
             if (e_sample_count >= e_sample_limit)   // e_sample limit was set before we started
             {                                       // if we've reached the limit it is time to save the results
+                data.bins[recCount][PEAK_DIF] = max_d_squared;  // save the peak diff for this record
+                max_d_squared = 0;                  // reset the peak dif for the next record
                 offset = TOP_ODR_POSITION;          // start out pointing to the correct data element
                 for (odr_count = 0; odr_count < 6; odr_count ++)    // start with the highest ODR and work our way down
                 {
@@ -2847,12 +2877,24 @@ unsigned char register_SS(void)
     // An error is generated if the offset plus the number of bytes goes out of range.
 void set_new_parameters(void)
 {   unsigned char offset;
+    unsigned char bit_test;
+    unsigned char odrs;
         // create integers out of parameter bytes (they might have changed)
+    e_sample_bits = (PARAM_SAMPLE_BITS);            // update the sampling parameter
+    if (e_sample_bits > 0x0F) e_sample_bits = 0x0F; // check for errors, can't be more than 15
     secMax =  (PARAM_SLOWBIN_HI_NOW<<8) | PARAM_SLOWBIN_LO_NOW ;    // The number of seconds to accumulate readings in each record (set of bins)
     max_run_time = PARAM_MAXRUN4H;
     for(offset=20; offset>17; offset--)
     {   max_run_time <<= 8;
         max_run_time |= parameters[offset];             // turn 4 unsigned chars into a long int
+    }
+    bit_test = 0x01;
+    odrs = PARAM_ODR_RATES;
+    for (offset = 0; offset<6; offset++)
+    {   // default for  odr_rate_on[7] = { YES, YES, YES, YES, YES, YES, NO}
+        odr_rate_on[offset] = ((odrs & bit_test) == bit_test);
+                        // Check the bit, if it is set, store a YES, otherwise a NO
+        bit_test <<= 1;     // next bit
     }
     maxRecords = (PARAM_MAX_RECORDS_HI<<8) | PARAM_MAX_RECORDS_LO;  // The maximum number of records to collect
 //    ADXL_power_cycle();                         //  turn the sensor off!
@@ -3426,7 +3468,7 @@ void slave_routines()
                 break;
             case START_RUN :
                 status = BUSY;
-                start_integration();
+//                start_integration();
                 received_command = STATUS;
                 break;
             case STOP_RUN :
