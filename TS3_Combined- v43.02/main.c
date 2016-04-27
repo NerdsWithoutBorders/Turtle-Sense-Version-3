@@ -269,9 +269,9 @@
 #define COAX_USES_SMCLK         UCA0CTL1 |= UCSSEL__SMCLK //Set the UART timing based on the SMCLK
 #define COAX_DMA_ENABLE         DMA_enableInterrupt     // Set the DMA receive source to the UART buffer
 #define COAX_DMA_DISABLE        DMA_disableInterrupt    // Set the DMA receive destination to the beginning of the data buffer
-#define COAX_DMA_RX_DESTINATION0 DMA_setDstAddress(DMA_CHANNEL_0, (uint32_t) incoming.uart, DMA_DIRECTION_UNCHANGED)
+#define COAX_DMA_RX_DESTINATION0 DMA_setDstAddress(DMA_CHANNEL_0, (uint32_t) coax_buffer, DMA_DIRECTION_UNCHANGED)
 #define COAX_DMA_RX_SOURCE0      DMA_setSrcAddress(DMA_CHANNEL_0, (uint32_t) &UCA0RXBUF, DMA_DIRECTION_UNCHANGED)
-#define COAX_DMA_RX_DESTINATION1 DMA_setDstAddress(DMA_CHANNEL_1, (uint32_t) incoming.uart+1, DMA_DIRECTION_INCREMENT)
+#define COAX_DMA_RX_DESTINATION1 DMA_setDstAddress(DMA_CHANNEL_1, (uint32_t) coax_buffer+1, DMA_DIRECTION_INCREMENT)
 #define COAX_DMA_RX_SOURCE1      DMA_setSrcAddress(DMA_CHANNEL_1, (uint32_t) &UCA0RXBUF, DMA_DIRECTION_UNCHANGED)
 #define DMA_SHORT_SIZE          0x0B                    // The length of a short coax message
 
@@ -281,10 +281,6 @@
 #define SMCLK_OFF       P3SEL1 &= ~BIT4                 // turn off the SMCLK output on P3.4
 #define SMCLK_ON        P3SEL1 |= BIT4                  // turn on the SMCLK output on P3.4
 
-#define CLOCKSPEED 0x08          // Set the clock speed (4 MHz)
-#define ONE_MHz         0x0000
-#define FOUR_MHz        0x0006
-#define EIGHT_MHz       0x000C
 
         // Low Power modes (MASTER and SLAVE)
 #define ENTER_LOW_POWER_MODE_1  __bis_SR_register(LPM1_bits + GIE)
@@ -501,7 +497,7 @@
     // If the speed is 100 Hz or less the buffer can be emptied once per second (SLEEP_INTERVALS = 8)
     // For 200 reads, this should be set to 2 buffer downloads (SLEEP_INTERVALS = 4)
     // For 400 reads, this should be set to 4 buffer downloads. (SLEEP_INTERVALS = 2)
-    // the number of samples per second times SLOWHOURSBINSEC can not be more than 64K or bins might overflow
+    // the number of samples per second times SLOWHOURSRECSEC can not be more than 64K or bins might overflow
 
 
 
@@ -565,13 +561,13 @@
 #define READY                   0x03    // Slave replies "Not busy, ready for instructions"
 #define BUSY                    0x04    // Slave replies "Busy recording data"
 #define DATA_READY              0x05    // Slave replies "Have data ready to send"
-#define REQUEST_ID              0x06    // Please send (or resend) identification
-#define REQUEST_PARAMETERS      0x07    // Please send (or resend) parameters
-#define REQUEST_DATA            0x08    // Please send all records from the smart sensor
+#define SEND_ID                 0x06    // Please send (or resend) identification
+#define SEND_PARAMETERS         0x07    // Please send (or resend) parameters
+#define SEND_DATA               0x08    // Please send all records from the smart sensor
 #define GOOD_TRANSMISSION       0x09    // Acknowledgement that the last transmission of data was received without error
 #define DATA_ERROR              0x0A    // Format or Checksum Error with last transmission /resend
 #define RESEND_LAST             0x0A    // Repeat the last transmission
-#define REQUEST_ERROR_INFO      0x0B    // Send information about the last error
+#define SEND_ERROR_INFO         0x0B    // Send information about the last error
 #define TURN_ADXL_OFF           0x0C    // Hardware power cycle -- powers down ADXL
 #define TURN_ADXL_ON            0x0D    // turn on the ADXL sensor in low power standby without changing any settings
 #define EMPTY_TIME_SLOT         0x0E    // sent by master to indicate the slot is available
@@ -632,26 +628,38 @@
 #define INTERRUPT_TWO         0x02      // = INT2 generated an interrupt
 
 
-////////////// PROGRAM TIMINGS ///////////////////////////
+////////////// PROGRAM TIMINGS FOR PHASE II  ///////////////////////////
     // Default timings  (You can change these)
 #define HOURS                1  // Default is 4  // Number of hours for data collection per call-in period once motion detected.  This must be a factor of 120.
 #define SLOWHOURS            1  // Default is 24 // Number of hours in a slow day of data collection
+//#define SLOW_DAYS           40  // Number of days that should elapse until there is more frequent reporting
+
+    // These are computed (don't change them)
+// #define RECSEC (15 * HOURS)     // The default is 60 // Number of seconds in each bin record.  Must be factor of 3600
+// #define SLOW_RECSEC (15 * SLOWHOURS)  // The default is 360 but it could be less if records are also stored in comm board or phone board.
+                                // Number of seconds in each bin record on a slow day (every 6 minutes)
+
+////////////// PROGRAM TIMINGS FOR PHASE III  ///////////////////////////
+    // Default timings  (You can change these)
 #define SLOW_DAYS           40  // Number of days that should elapse until there is more frequent reporting
 #define INTERVALS           48  // the total number of 1/8 second intervals (6 seconds total)
 #define REGISTRATION_WAIT    5  // Number of (6 second) loops to wait before reporting status changes of connected devices
+#define RECSEC            240    // The default is 1800 or 30 minutes // Number of seconds in each bin record.  Must be factor of 3600
+#define SLOW_RECSEC       240    // The default is 3600 or 1 hour // Number of seconds in each bin record on a slow day
 
-    // These are computed (don't change them)
-#define BINSEC (15 * HOURS)     // The default is 60 // Number of seconds in each bin record.  Must be factor of 3600
-#define SLOWHOURS_BIN_SEC (15 * SLOWHOURS)  // The default is 360 but it could be less if records are also stored in comm board or phone board.
-                                // Number of seconds in each bin record on a slow day (every 6 minutes)
 
     // These can be changed, but the program may need to be adjusted (change with caution)
 #define MAX_BIN             10  // number of histogram bins kept in each record (changing this might cause problems -- check thoroughly)
 #define DATA_SIZE           16  // This is MAX_BIN plus other parameters (currently 6: Temp, X, Y, Z, Count, Max)
 #define DATA_BYTES          32  // The number of bytes in one record (DATA_SIZE * 2)
-#define MAX_RECORDS          2  // The default is 240 // The maximum number of Bin records assuming about 8 K and 32 bytes per record
-#define FRACTIONAL_BITS      8  // The number of bits for each ODR that is the fractional part of the number.
-                                // For example if the reported amount is 0xA34E, set at 8 the fractional portion is "4E" = 0x004E/0x0100
+#define MAX_RECORDS         16  // The default is 244 (240 pluss 4 extra) Add 4 to the desired number
+#define RECORD_BUNCH         6  // The number of records sent at at time (every 1/8 second interval)
+
+#define FRACTIONAL_BITS      4  // The number of bits for each ODR that is the fractional part of the number.
+                                // For example if the reported amount is 0xA34E, set at 4 the fractional portion is "E" = 0x000E/0x0010
+#define SAMPLE_BITS         12  // The power of two for the number of samples to integrate
+                                // also used to bitshift the result to divide for an average reading
+
 
     // System parameters
 #define REPORT_HEADINGS    YES  // flags if headings are printed in the reports (1=YES, 0 = NO)
@@ -662,6 +670,7 @@
                                 // 12V NiMH (8 AA * 1.2V) = 549 which is about 8 volts
                                 // 9V  NiMH = (7 * 1.2V) = 480 which is about 7 volts
 
+
     //  Computed Default timings (Don't change these, change the ones above)
 #define SECS_IN_DAY         86400       // Number of seconds in a day
 #define TIME_OUT              256       // resets if no readings after this many seconds after expected
@@ -670,14 +679,12 @@
 #define MAXRUN3  ((MAXRUN & 0x00FF0000) / 0x00010000)
 #define MAXRUN2  ((MAXRUN & 0x0000FF00) / 0x00000100)
 #define MAXRUN1L  (MAXRUN & 0x000000FF)         // The lowest byte of MAXRUN
-#define BINSEC_HI ((BINSEC & 0xFF00) / 0x0100)  // The high byte of BIN_SEC
-#define BINSEC_LO (BINSEC & 0x00FF)             // The low byte of BIN_SEC
-#define SLOWBIN_HI ((SLOWHOURS_BIN_SEC & 0xFF00) / 0x0100)  // The high byte of SLOWHOURS_BIN_SEC
-#define SLOWBIN_LO (SLOWHOURS_BIN_SEC & 0x00FF) // The low byte of SLOWHOURS_BIN_SEC
-#define MAX_RECORDS_HI ((MAX_RECORDS & 0xFF00) / 0x0100)    // The high byte of MAX_RECORDS
-#define MAX_RECORDS_LO  (MAX_RECORDS & 0x00FF)  // The low byte of MAX_RECORDS
-#define SAMPLE_BITS     4   // The power of two for the number of samples to integrate
-                            // also used to bitshift the result to divide for an average reading
+#define RECSEC_HI ((RECSEC & 0xFF00) / 0x0100)  // The high byte of BIN_SEC
+#define RECSEC_LO (RECSEC & 0x00FF)             // The low byte of BIN_SEC
+#define SLOWREC_HI ((SLOW_RECSEC & 0xFF00) / 0x0100)  // The high byte of SLOW_RECSEC
+#define SLOWREC_LO (SLOW_RECSEC & 0x00FF) // The low byte of SLOW_RECSEC
+#define MAX_RECORDS_HI (((MAX_RECORDS-4) & 0xFF00) / 0x0100)    // The high byte of MAX_RECORDS
+#define MAX_RECORDS_LO  ((MAX_RECORDS-4) & 0x00FF)  // The low byte of MAX_RECORDS
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -714,6 +721,10 @@
     volatile unsigned char data_ready;                  // indicates that there is data ready to report using the phone
     volatile unsigned char time_to_resume;              // indicate that is time to end suspend mode
     volatile unsigned char registering;                 // set when trying to register, reset if some other device gets there first
+    volatile unsigned char adxl_reading_on;             // the flag to read the ADXL data
+    volatile unsigned char integrating_on;              // the flag to integrate the ADXL data (phase III routine)
+    volatile unsigned char bin_process_on;              // the flag to process the ADXL data into bins (phase II routine)
+
 
 
     ////// SENDING MESSAGES
@@ -757,16 +768,17 @@
                                     75,80,85,88,90,91,92,93,94,95,
                                     96,97,98,99,100,101};
     const int battery_levels[] =  {650,670,675};    //TODO// to be created with battery levels that correspond to the percents
-    volatile unsigned int recCount;                 // The count of how many records have been collected since last upload
-    volatile unsigned long int secCount = 0;        // the number of seconds since the last report
-    volatile unsigned int recSecs = 0;              // The number of seconds that the current record has been active
-    volatile unsigned int secMax;                   // The number of seconds to accumulate readings
-    volatile unsigned int day_count = 0;            // Number of days the nest has been active
-    volatile unsigned int last_day_count = 0;       // Number of days the nest was active when last reported
+    volatile unsigned int rec_count;                // The count of how many records have been collected since last upload
+    volatile unsigned int recs_reported;            // The total of how many records have been received for reporting
+    volatile unsigned long int sec_count;           // the number of seconds since the last report
+    volatile unsigned int rec_secs;                 // The number of seconds that the current record has been active
+    volatile unsigned int sec_max;                  // The number of seconds to accumulate readings in a reading
+    volatile unsigned int day_count;                // Number of days the nest has been active
+    volatile unsigned int last_day_count;           // Number of days the nest was active when last reported
     volatile unsigned char error_code = 0x00;       // for future error handling
-    unsigned long int max_run_time = SECS_IN_DAY-60; // The maximum time the sensor can run without reporting back to comm head.
-    unsigned int maxRecords = MAX_RECORDS;           // The maximum number of records to collect     (can be changed at some future point)
-
+    unsigned long int max_run_time = SECS_IN_DAY-60;// The maximum time the sensor can run without reporting back to comm head.
+    unsigned char max_records;    // The maximum number of records to collect     (can be changed at some future point)
+    unsigned char record_number;                    // the record being sent
 
     ////// SENSOR INFORMATION
     volatile unsigned char tx_error;                // error code for last transmission
@@ -809,23 +821,23 @@
     // See the top of the program to set the serial number.
 
 //#define NEST_ID "123456.000,060914,S-AA0001"
-    volatile char serial_ID[] = SERIAL_NUMBER;  // This won't actually be used so it should never be altered
+    volatile char serial_id[] = SERIAL_NUMBER;  // This won't actually be used so it should never be altered
     unsigned char serial_num[] = SERIAL_NUMBER;     // Store a copy of a SERIAL_NUMBER that cannot be altered
 
-    unsigned char nest_ID[] = NEST_ID;          // The unique ID of each nest based on time, date, and sensor ID
+    unsigned char nest_id[] = NEST_ID;          // The unique ID of each nest based on time, date, and sensor ID
     // an example of the NEST_ID is "123456.890,060914,S-AA0001"
     // it breaks down as follows:
-#define NEST_ID_BYTES 26    // the number of bytes in the nest_ID above
+#define NEST_ID_BYTES 26    // the number of bytes in the nest_id above
     // Starts with the UTC time, and GPS location copied directly from the GPS output.
     // The UTC is in the format: hhmmss.sss
-#define UTC 0               // nest_ID[UTC] - The offset for the GPS UTC time code
-#define UTC_BYTES 6         // The last byte is nest_ID[9], but the last 3 digits always seem to be zeros
+#define UTC 0               // nest_id[UTC] - The offset for the GPS UTC time code
+#define UTC_BYTES 6         // The last byte is nest_id[9], but the last 3 digits always seem to be zeros
     // The DATE is the date the sensor was activated in the format: ddmmyy  where:
     // dd - day 01..31
     // mm - month 01..12
     // yy - year 00..99 - 2000 to 2099
-#define DATE 11             // nest_ID[DATE] - The date the sensor was activated by this comm tower
-#define DATE_BYTES 6        // The last byte is nest_ID[16]
+#define DATE 11             // nest_id[DATE] - The date the sensor was activated by this comm tower
+#define DATE_BYTES 6        // The last byte is nest_id[16]
 #define DAY 11
 #define DAY_BYTES 2
 #define MONTH 13
@@ -836,8 +848,8 @@
     // The first letter is the hardware version
     // The second letter is the software version
     // The next 4 digits is a unique production number for each device
-#define SERIAL 18           // nest_ID[SERIAL] - The offset for the sensor serial number nest_ID[SERIAL]
-#define SERIAL_BYTES 8      // The last byte is nest_ID[25]
+#define SERIAL 18           // nest_id[SERIAL] - The offset for the sensor serial number nest_id[SERIAL]
+#define SERIAL_BYTES 8      // The last byte is nest_id[25]
 
     // SMART SENSOR PARAMETERS
 #define LOAD_PARAMETERS_TRIES 1          // The number of times that we will look for a new parameter file each time we connect
@@ -850,18 +862,20 @@ unsigned char parameters[40] = {
         INTMAP1, INTMAP2, FILTER_CTL, POWER_CTL_OFF, // parameters[0] to [13] - the first 14 are all the ADXL reset parameters.
         SLEEP_INTERVALS,                // parameters[14] - The number of clock interrupts between each FIFO buffer read.
         READ_SPEED,                     // parameters[15] - The number of interrupts per second (default is 8 which equals 1/8 second)
-        SLOWBIN_LO, SLOWBIN_HI,         // parameters[16] and [17] - The current number of seconds to accumulate readings in each record (set of bins)
+        SLOWREC_LO, SLOWREC_HI,         // parameters[16] and [17] - The current number of seconds to accumulate readings in each record (set of bins)
         MAXRUN1L, MAXRUN2, MAXRUN3, MAXRUN4H,   // parameters[18] to [21] - The maximum time the sensor can run without reporting back to comm head.
         MAX_RECORDS_LO, MAX_RECORDS_HI, // parameters[22] and [23] - The maximum number of records to collect
         CALIBRATE_TEMP,                 // parameters[24] - Is the temperature calibration active (YES=calibrate)
         REPORT_HEADINGS,                // parameters[25] - (comm board) Flag if we are sending headings in report (YES=headings)
-        BINSEC_LO, BINSEC_HI,           // parameters[26] and [27] timing settings for active days
+        RECSEC_LO, RECSEC_HI,           // parameters[26] and [27] timing settings for active days
         SLOW_DAYS,                      // parameters[28] - Number of days of low activity
-        SLOWBIN_LO, SLOWBIN_HI,         // parameters[29] and [30] - The number of seconds to accumulate readings in each record (set of bins)
+        SLOWREC_LO, SLOWREC_HI,         // parameters[29] and [30] - The number of seconds to accumulate readings in each record (set of bins)
         LOAD_PARAMETERS_TRIES,          // parameters[31] - the number of times we try to load new parameters (must be 1 or more)
         SAMPLE_BITS,                    // parameters[32] - the power of two for integration samples to accumulate (also used to bit shift for an average)
-        ODR_RATES,                      // parameters[33] - which ODR rates are being calculated bit0 = base rate, bit1 is base/2, bit2 is base/4, etc.
-        0,0,0,0,0,0 };                  // parameters[34] to [39] reserved for future use
+        FRACTIONAL_BITS,                // parameters[33] - the number of bits of the reported values that is fractional (defalut is 4)
+        ODR_RATES,                      // parameters[34] - which ODR rates are being calculated bit0 = base rate, bit1 is base/2, bit2 is base/4, etc.
+        RECORD_BUNCH,                   // parameters[35] - the number of records transfered during each 1/8 second interval
+        0,0,0,0 };                      // parameters[36] to [39] reserved for future use
 #define PARAM_BYTES 40 // the number of bytes in the parameters structure above
      // new parameters can be ftp'd into the unit from the web
 unsigned char new_parameters[40]= {
@@ -871,18 +885,20 @@ unsigned char new_parameters[40]= {
         INTMAP1, INTMAP2, FILTER_CTL, POWER_CTL_OFF,
         SLEEP_INTERVALS,
         READ_SPEED,
-        SLOWBIN_LO, SLOWBIN_HI,
+        SLOWREC_LO, SLOWREC_HI,
         MAXRUN1L, MAXRUN2, MAXRUN3, MAXRUN4H,
         MAX_RECORDS_LO, MAX_RECORDS_HI,
         CALIBRATE_TEMP,
         REPORT_HEADINGS,
-        BINSEC_LO, BINSEC_HI,
+        RECSEC_LO, RECSEC_HI,
         SLOW_DAYS,
-        SLOWBIN_LO, SLOWBIN_HI,
+        SLOWREC_LO, SLOWREC_HI,
         LOAD_PARAMETERS_TRIES,
         SAMPLE_BITS,
+        FRACTIONAL_BITS,
         ODR_RATES,
-        0,0,0,0,0,0 };
+        RECORD_BUNCH,
+        0,0,0,0 };
 
 #define PARAM_THRESH_ACT_L      parameters[0]
 #define PARAM_THRESH_ACT_H      parameters[1]
@@ -900,8 +916,8 @@ unsigned char new_parameters[40]= {
 #define PARAM_POWER_CTL_OFF     parameters[13]
 #define PARAM_SLEEP_INTERVALS   parameters[14]
 #define PARAM_READ_SPEED        parameters[15]
-#define PARAM_SLOWBIN_LO_NOW    parameters[16]
-#define PARAM_SLOWBIN_HI_NOW    parameters[17]
+#define PARAM_SLOWREC_LO_NOW    parameters[16]
+#define PARAM_SLOWREC_HI_NOW    parameters[17]
 #define PARAM_MAXRUN1L          parameters[18]
 #define PARAM_MAXRUN2           parameters[19]
 #define PARAM_MAXRUN3           parameters[20]
@@ -910,14 +926,16 @@ unsigned char new_parameters[40]= {
 #define PARAM_MAX_RECORDS_HI    parameters[23]
 #define PARAM_CALIBRATE_TEMP    parameters[24]
 #define PARAM_REPORT_HEADINGS   parameters[25]
-#define PARAM_BINSEC_LO         parameters[26]
-#define PARAM_BINSEC_HI         parameters[27]
+#define PARAM_RECSEC_LO         parameters[26]
+#define PARAM_RECSEC_HI         parameters[27]
 #define PARAM_SLOW_DAYS         parameters[28]
-#define PARAM_SLOWBIN_LO        parameters[29]
-#define PARAM_SLOWBIN_HI        parameters[30]
+#define PARAM_SLOWREC_LO        parameters[29]
+#define PARAM_SLOWREC_HI        parameters[30]
 #define PARAM_LOAD_TRIES        parameters[31]
 #define PARAM_SAMPLE_BITS       parameters[32]
-#define PARAM_ODR_RATES         parameters[33]
+#define PARAM_FRACTIONAL_BITS   parameters[33]
+#define PARAM_ODR_RATES         parameters[34]
+#define PARAM_RECORD_BUNCH      parameters[35]
 
 #define NEW_THRESH_ACT_L      new_parameters[0]
 #define NEW_THRESH_ACT_H      new_parameters[1]
@@ -935,8 +953,8 @@ unsigned char new_parameters[40]= {
 #define NEW_POWER_CTL_OFF     new_parameters[13]
 #define NEW_SLEEP_INTERVALS   new_parameters[14]
 #define NEW_READ_SPEED        new_parameters[15]
-#define NEW_SLOWBIN_LO_NOW    new_parameters[16]
-#define NEW_SLOWBIN_HI_NOW    new_parameters[17]
+#define NEW_SLOWREC_LO_NOW    new_parameters[16]
+#define NEW_SLOWREC_HI_NOW    new_parameters[17]
 #define NEW_MAXRUN1L          new_parameters[18]
 #define NEW_MAXRUN2           new_parameters[19]
 #define NEW_MAXRUN3           new_parameters[20]
@@ -945,14 +963,16 @@ unsigned char new_parameters[40]= {
 #define NEW_MAX_RECORDS_HI    new_parameters[23]
 #define NEW_CALIBRATE_TEMP    new_parameters[24]
 #define NEW_REPORT_HEADINGS   new_parameters[25]
-#define NEW_BINSEC_LO         new_parameters[26]
-#define NEW_BINSEC_HI         new_parameters[27]
+#define NEW_RECSEC_LO         new_parameters[26]
+#define NEW_RECSEC_HI         new_parameters[27]
 #define NEW_SLOW_DAYS         new_parameters[28]
-#define NEW_SLOWBIN_LO        new_parameters[29]
-#define NEW_SLOWBIN_HI        new_parameters[30]
+#define NEW_SLOWREC_LO        new_parameters[29]
+#define NEW_SLOWREC_HI        new_parameters[30]
 #define NEW_LOAD_TRIES        new_parameters[31]
 #define NEW_SAMPLE_BITS       new_parameters[32]
-#define NEW_ODR_RATES         new_parameters[33]
+#define NEW_FRACTIONAL_BITS   new_parameters[33]
+#define NEW_ODR_RATES         new_parameters[34]
+#define NEW_RECORD_BUNCH      new_parameters[35]
 
 ////////////////////////////////////////////////////////
 ////////////   REPORT GENERATION   /////////////////////
@@ -1000,14 +1020,14 @@ unsigned char new_parameters[40]= {
             "AT#FTPDELE",       // messages[27] Delete parameter file
             "Report: ",         // messages[28]
             "Sensor ID#: ",             // messages[29]
-            "S-AA0000",                 // messages[30] The serial number of the smart sensor
+            "S-AA0000",                 // messages[30] The serial number of the smart sensor for reports
             "Today's date: ",           // messages[31]
             "2016-01-01",               // messages[32] Today's date
             "Report #: ",               // messages[33]
             "01",                       // messages[34]  TODAYS_NUM -The number of reports sent today
             " ",                        // messages[35]
             "Comm ID#: ",               // messages[36]
-            SERIAL_NUMBER,              // messages[37] The serial number of the master
+            SERIAL_NUMBER,              // messages[37] The serial number of this device
             "Nest location: ",          // messages[38]
             "0000.0000N",               // messages[39] Nest GPS latitude
             "00000.0000W",              // messages[40] Nest GPS longitude
@@ -1021,9 +1041,6 @@ unsigned char new_parameters[40]= {
             "\rBattery level: ",        // messages[48]
             "Rec#,Temp,   X,   Y,   Z, Cnt, Max,Bins: (Low) to (High)\r",   // messages[49]
             ",",                        // messages[50] just a comma
-            // File type codes:
-            //          Used in file names to distinguish the different types of files generated
-            //          TODO // finish creating header files, log files and alert files.
             "_r-",                  // messages[51]  "r-" -- a standard report
             "=\"parameters",        // messages[52] parameter file name beginning
             ".ts",                  // messages[53] parameter file name ending
@@ -1037,21 +1054,23 @@ unsigned char new_parameters[40]= {
             "RESET OCCURRED.\r",            // messages[61]
             "CONNECTED - MONITORING.\r",    // messages[62]
             "DISCONNECTED.\r",              // messages[63]
-            "Rec#,Temp,   X,   Y,   Z, H2O,Peak,", // messages[64]
+            "Rec#,Temp,   X,   Y,   Z, H2O,Peak", // messages[64]
             "NEST DATA LOADED",             // messages[65]
             " ",                            // messages[66]
-            "Energy samples per second (ODR): ", // messages[67]
-            "ALL\r",        // messages[68]
-            " 400",         // messages[69]
-            " 200",         // messages[70]
-            " 100",         // messages[71]
-            "  50",         // messages[72]
-            "  25",         // messages[73]
-            "12.5",         // messages[74]
-            "SENSOR_LOG_",  // messages[75]
-            "ACTIVITY_LOG_",// messages[76]
-            "EVENT: ",      // messages[77]
-            " Min, Max"     // messages[78]
+            "Energy samples per second (ODR):   ", // messages[67]
+            "ALL\r",                // messages[68]
+            " 400 ",                // messages[69]
+            " 200 ",                // messages[70]
+            " 100 ",                // messages[71]
+            "  50 ",                // messages[72]
+            "  25 ",                // messages[73]
+            "12.5 ",                // messages[74]
+            "SENSOR_LOG_",          // messages[75]
+            "ACTIVITY_LOG_",        // messages[76]
+            "EVENT: ",              // messages[77]
+            ", Min, Max",           // messages[78]
+            "2001-01-01,01:01:00",  // messages[79] Temporary storage of the time of previous report
+                                    //              not updated by census reports, only by data reporting
             };
                                     // If the command is complete it ends with a CR (\r)
 
@@ -1121,21 +1140,22 @@ unsigned char new_parameters[40]= {
 #define TXT_RESET           61  //  "RESET OCCURRED\r"
 #define TXT_MONITORING      62  //  "CONNECTED -- MONITORING\r"
 #define TXT_DISCONNECTED    63  //  "DISCONNECTED\r"
-#define TXT_64              64  //
+#define TXT_NEW_HEADINGS    64  //  "Rec#,Temp,   X,   Y,   Z, H2O,Peak"
 #define TXT_NEST_DATA_FOUND 65  //  "NEST DATA FOUND"
 #define TXT_66              66  //
 #define TXT_ENERGY_SAMPLES  67  //  "Energy samples per second (ODR): "
 #define TXT_ALL             68  //  "ALL\r"
-#define TXT_400             69  //  " 400"
-#define TXT_200             70  //  " 200"
-#define TXT_100             71  //  " 100"
-#define TXT_50              72  //  "  50"
-#define TXT_25              73  //  "  25"
+#define TXT_400             69  //  " 400,"
+#define TXT_200             70  //  " 200,"
+#define TXT_100             71  //  " 100,"
+#define TXT_50              72  //  "  50,"
+#define TXT_25              73  //  "  25,"
 #define TXT_12              74  //  "12.5"
 #define TXT_SENSOR_LOG      75  //  "SENSOR_LOG_"
 #define TXT_ACTIVITY_LOG    76  //  "ACTIVITY_LOG_"
 #define TXT_EVENT           77  //  "EVENT: "
-
+#define TXT_MIN_MAX         78  //  ", Min, Max"
+#define LAST_REPORT_TIME    79  //
      //      CREG codes
 #define CELL_NOT_REGISTERED 0       //      0 - not registered, ME is not currently searching a new operator to
                                     //          register to (bad reception?  antenna disconnected?
@@ -1196,6 +1216,22 @@ unsigned char new_parameters[40]= {
             END_OF_SCRIPT
             };
 
+    static const char ODR_script[] = {
+            CR, CR,                 //  skip a line
+            TXT_ENERGY_SAMPLES,     //  "Energy samples per second (ODR): "
+            TXT_400, TXT_400,       //  " 400"
+            TXT_200, TXT_200,       //  " 200"
+            TXT_100, TXT_100,       //  " 100"
+            TXT_50,  TXT_50,        //  "  50"
+            TXT_25,  TXT_25,        //  "  25"
+            TXT_12,  TXT_12,        //  "12.5"
+            CR,
+            TXT_NEW_HEADINGS,       // headings for record data
+            TXT_MIN_MAX, TXT_MIN_MAX, TXT_MIN_MAX, TXT_MIN_MAX, TXT_MIN_MAX, TXT_MIN_MAX,
+            CR,
+            END_OF_SCRIPT
+            };
+
     static const char end_report[] = {
             CR, COPYLEFT, TXT_END,              // end of report text
             END_OF_SCRIPT
@@ -1252,43 +1288,53 @@ unsigned char new_parameters[40]= {
     // DATA STORAGE DEFINITIONS
     // These are the usage for each byte in each record of the data.bins[][] array
     // see SENSOR DATA immediately below
-    #define TEMPS       0
-    #define X_POS       1
-    #define Y_POS       2
-    #define Z_POS       3
-    #define READINGS    4
-    #define MOISTURE    4
-    #define HIGHEST_BIN 5
-    #define PEAK_DIF    5
-    #define BINS        6          // The first bin stored
-    #define TOP_ODR_POSITION 6
-    #define JOLT_BINS   25
-    #define JOLT_BITS   32
-    #define JOLT_MASK   0x80000000
-    #define MAX_SENSORS     46      // perhaps one sensor's data can be uploaded while the other is transmitted out the phone.
-    #define ODRS_WATCHED    6
+#define TEMPS       0
+#define X_POS       1
+#define Y_POS       2
+#define Z_POS       3
+#define READINGS    4
+#define HIGHEST_BIN 5
+#define PEAK_DIF    5
+#define BINS        6          // The first bin stored
 
+    // These are the usage for each byte in each record of the data.energy[][] array
+#define TEMP_HI     0
+#define TEMP_LO     1
+#define X_POS_HI    2
+#define X_POS_LO    3
+#define Y_POS_HI    4
+#define Y_POS_LO    5
+#define Z_POS_HI    6
+#define Z_POS_LO    7
+#define MOISTURE_HI 8
+#define MOISTURE_LO 9
+#define PEAK_DIF_HI 10
+#define PEAK_DIF_LO 11
+#define FIRST_ODR   12        // The first Output Data Rate integration stored
 
-    ///  COMMUNICATIONS DATA BUFFER
-    ///  This buffer holds incoming data temporarily when it is moved by UART and SPI routines
-    ///  The same buffer is used by the Slave and Master for communications and
-    ///  the slave uses this buffer to store data from the ADXL sensor
-    #define DATA_BUFFER_SIZE 0x0200         // this needs to be large enough to handle the largest command of
-                                            // the most reads by the ADXL sensor in 1/8 of a second at the highest ODR
-                                            // with temperature, that would be 400, so x0200 is more than enough
+#define JOLT_BINS   25
+#define JOLT_BITS   32
+#define JOLT_MASK   0x80000000
+#define MAX_SENSORS     46      // perhaps one sensor's data can be uploaded while the other is transmitted out the phone.
+#define ODRS_WATCHED    6
+#define RECORD_BYTES    (12 + (ODRS_WATCHED * 4) )
 
-    union Incoming
-    {   unsigned int spi[DATA_BUFFER_SIZE];     // ADXL data comes in ints
-        unsigned char uart[DATA_BUFFER_SIZE/2]; // UART data comes in bytes
-    }incoming;
+    ///  COMMUNICATIONS DATA BUFFERS
+    ///  This buffers hold incoming data temporarily when it is moved by UART and SPI routines
+    ///  The same buffer is used by the Slave and Master for coax communications
+    ///  the slave uses the SPI buffer to store data from the ADXL sensor
+    #define DATA_BUFFER_SIZE 0x0200    // this needs to be large enough to handle the largest command of
+                                       // the most reads by the ADXL sensor in 1/8 of a second at the highest ODR
+                                       // with temperature, that would be 400, so x0200 is more than enough
+    unsigned int spi_buffer[DATA_BUFFER_SIZE];     // temp storage for ADXL spi data
+    unsigned char coax_buffer[DATA_BUFFER_SIZE];   // temp storage for coax uart commands and data
+    unsigned char phone_buffer[DATA_BUFFER_SIZE];  // temp storage for phone uart commands and data
 
-    union Buffer
-    {   unsigned int bins[JOLT_BITS];  // Temporary storage for ADXL data until a record is completed and compressed.
-                                                // 28 bins will be created, but only MAX_BIN of them will be stored in bins[].
-                                                // All bins lower than the MAX_BIN highest will be discarded.
-                                                // The bins increase exponentially by a factor of the square root of two (about 3db amplitude per bin)
-        unsigned char bytes[JOLT_BITS+JOLT_BITS]; //Temporary storage for UART data
-    } buffer;
+    unsigned int adxl_bins[JOLT_BITS];
+                    // Temporary storage for ADXL data until a record is completed and compressed.
+                    // 28 bins will be created, but only MAX_BIN of them will be stored in bins[].
+                    // All bins lower than the MAX_BIN highest will be discarded.
+                    // The bins increase exponentially by a factor of the square root of two (about 3db amplitude per bin)
 
     volatile unsigned int adc_read;                 // The data read in the adc interrupt routine
     volatile signed int aXold[32];                  //  an array of previous acc values, to determine delta acc
@@ -1322,56 +1368,47 @@ unsigned char new_parameters[40]= {
     volatile unsigned char odr_rate_on[7] ;
         //determine whether to include into ODR integration. They all start on.
         //#6 is the same as #5 so it is off.
-    volatile unsigned char fractional_bits = FRACTIONAL_BITS;   // The number of bits that will be the fractional portion
-        // of the result.  For turtles half the result is for the fractional part (FRACTIONAL_BITS = 8)
+    volatile unsigned char bits_2_shift;     // the number of bits to shift to divide the totals to get averages
+        // this is frequently recalculated in case the parameters change
+    volatile unsigned char fractional_bits;   // The number of bits that will be the fractional portion
+        // of the result.  For turtlee_sample_bitss half the result is for the fractional part ( default FRACTIONAL_BITS = 4)
     volatile unsigned char e_sample_bits;     // The number of bits to shift to divide for the integration of ADXL's ODR
-        // assuming the ODR is 400  Minimum is 0, maximum is 15, but numbers that high are probably not practical
-        // The result will be a char for the integer portion of the average, and a char for the fractional portion (1/256)
-        // The maximum average is just 256, which for turtles is just fine.  This might need adjustments for other applications
-        // in which case you'd change FRACTIONAL_BITS from its default value of 8.
+        // assuming the ODR is 400  Minimum is 5, maximum is 15, but numbers that high are probably not practical
+        // The result will be a char for the integer portion of the average, and a char for the fractional portion (default is 1/16)
+        // The maximum average (at the default SAMPLE_BITS value of 12) is 4096, which for turtles is just fine.
+        // This might need adjustments for other applications
+        // in which case you'd change FRACTIONAL_BITS from its default value of 4.
+        // the SAMPLE_BITS minus FRACTIONAL_BITS cannot be negative for any ODR.
         // Subtract the following from the e_sample_bits column for other ODRs:
         // -5 for 12.5 Hz, -4 for 25, -3 for 50,  -2 for 100,  -1 for 200
-        // e_sample_bits   12.5  25     50    100       200     400     Time
-        //   0              8    16     32     64      128     256      ~.64 seconds
-        //   1             16    32     64    128      256     512      ~1.3 seconds
-        //   2             32    64    128    256      512    1024      ~2.5 seconds
-        //   3             64   128    256    512     1024    2048      ~5.1 seconds
-        //   4            128   256    512   1024     2048    4096       ~10 seconds (default)
-        //   5            256   512   1024   2048     4096    8192       ~20 seconds
-        //   6            512  1024   2048   4096     8182   16384       ~41 seconds
-        //   7           1024  2048   4096   8182    16384   32768       ~82 seconds
-        //   8           2048  4096   8182  16384    32786   65536      ~164 seconds
-        //   9           4096  8182  16384  32786    65536  131072      ~5.1 minutes
-        //  10           8182 16384  32786  65536   131072  262144     ~10.2 minutes
-    volatile unsigned int e_sample_limit;   // The number of samples we'll take (64K max)
+        //                -- Number of samples at each ODR --
+        // e_sample_bits  12.5   25    50   100    200    400     Time
+        // ------------- ----- ----- ----- ----- ------ ------ -------------
+        //   5              1     2     4     8     16     32   ~.08 seconds
+        //   6              2     4     8    16     32     64   ~.16 seconds
+        //   7              4     8    16    32     64    128   ~.32 seconds
+        //   8              8    16    32    64    128    256   ~.64 seconds
+        //   9             16    32    64   128    256    512   ~1.3 seconds
+        //  10             32    64   128   256    512   1024   ~2.5 seconds
+        //  11             64   128   256   512   1024   2048   ~5.1 seconds
+        //  12            128   256   512  1024   2048   4096    ~10 seconds (default)
+        //  13            256   512  1024  2048   4096   8192    ~20 seconds
+        //  14            512  1024  2048  4096   8182  16384    ~41 seconds
+        //  15           1024  2048  4096  8182  16384  32768    ~82 seconds
+
     volatile unsigned int bin=0;            // bin counter
     volatile char slave_registered;         // the interval assigned by the master during registration
 
     union Records
     {    unsigned char bytes[MAX_RECORDS][(MAX_BIN+6)*2];    // data storage as bytes
          unsigned int bins[MAX_RECORDS][MAX_BIN+6];          // data storage as ints when used for bin storage
-         unsigned char energy[2][MAX_RECORDS][12 + (ODRS_WATCHED * 2)]; // data storage as ints when used for energy storage
+         unsigned char energy[MAX_RECORDS][RECORD_BYTES]; // data storage as chars when used for reports
         // other formats are possible for other data arrangments, but the reports are expecting bytes.
     } data;
 
 
- //    unsigned char data.bytes[MAX_RECORDS][32];   (original code in PHASE TWO)
 
-    //  (used by master for data storage to generate reports)
-    //  [MAX_RECORDS][0-1]   -- Temperature reading (the average of 16 readings)
-    //  [MAX_RECORDS][2-3]   -- X Position
-    //  [MAX_RECORDS][4-5]   -- Y Position
-    //  [MAX_RECORDS][6-7]   -- Z Position
-    //  [MAX_RECORDS][8-9]   -- Total number of accumulated readings for each record
-    //  [MAX_RECORDS][10-11] -- Highest Bin: the highest bin corresponds to bincount
-    //                          (plus one because zero readings are possible) of the highest bit
-    //                          triggered in any reading.  If there are high readings (>0x0A)
-    //                          the lowest bins are dropped.  EG:  0x0A = the highest is bin 0x0A,
-    //                          the lowest bin correspondsto the lowest readings;  0x10 = the highest is bin 0x10
-    //                          the lowest 6 bins are dropped.
-    //  [MAX_RECORDS][22-31] -- The ten highest bin readings.  Bytes 30 and 31 are the highest bin.
-
-    //    unsigned char data.energy[MAX_SENSORS][MAX_RECORDS][24];
+    //    unsigned char data.energy[MAX_RECORDS][RECORD_BYTES];  (PHASE THREE)
     //  (used by master for data storage to generate reports)
     //  [MAX_RECORDS][0-1]   -- Temperature reading (the average of 16 readings)
     //  [MAX_RECORDS][2-3]   -- X Position
@@ -1379,7 +1416,9 @@ unsigned char new_parameters[40]= {
     //  [MAX_RECORDS][6-7]   -- Z Position
     //  [MAX_RECORDS][8-9]   -- Average moisture reading
     //  [MAX_RECORDS][10-11] -- Peak difference recorded
-    //  [MAX_RECORDS][12-13] -- Average energy reading at Highest ODR rate (400/sec max)
+    //  [MAX_RECORDS][12-13] -- Minimum energy reading at Highest ODR rate (400/sec max)
+    //  [MAX_RECORDS][14-15] -- Maximum energy reading at Highest ODR rate (400/sec max)
+
     //  ----------------------------------- the following fields are optional ---------
     //  [MAX_RECORDS][14-15] -- Next Average energy reading (ODR = 200 Hz or next highest)
     //  [MAX_RECORDS][16-17] -- Next Average energy reading (ODR = 100 HZ or next highest)
@@ -1507,6 +1546,23 @@ void wait_a_sec(unsigned int wait_seconds)
    for (; wait_seconds; wait_seconds--) wait(1027);
    // this will take about a second.
 }
+
+
+// sleep until a specific interval cycle
+void wait_for_cycle(unsigned char interval_cycle)
+{
+    intervals_on = YES;
+    while (interval_count != interval_cycle)
+        ENTER_LOW_POWER_MODE_3;
+}
+
+
+// sleep until interval count gets to the last interval
+void wait_for_last_cycle(void)
+{
+    wait_for_cycle(interval_limit -1);
+}
+
 
 
 // turn on red LED, wait specified amount of time, turn off LED
@@ -1795,7 +1851,7 @@ unsigned char receive_message(void)
         if (received_datalength)                                // skip if we don't expect any data
             for (bytecount = 0; bytecount<received_datalength; bytecount++)
             {   while (COAX_RX_BUFF_EMPTY && waiting);                  // receive data
-               incoming.uart[bytecount] = char_received = COAX_RX_BUFF; // store data in the buffer.
+               coax_buffer[bytecount] = char_received = COAX_RX_BUFF;   // store data in the buffer.
                running_checksum += char_received;                       // keep the checksum current
             }       // done receiving checksum, receive the final zero
         while (COAX_RX_BUFF_EMPTY && waiting);                  // get the last byte
@@ -1813,9 +1869,9 @@ unsigned char receive_message(void)
                 // if the checksum doesn't match...
     if ( (received_protocol != PROTOCOL_BYTE) || (last_byte) ) tx_error = PROTOCOL_ERROR;
                 //protocol errors negate data errors
-    if (waiting == NO) tx_error = TIMEOUT_ERROR;  // timeout errors override all others
-    waiting = NO;                           // reset this flag
-    return (tx_error == NO_ERROR);          // returns true if all good, false if there's an error
+    if (waiting == NO) tx_error = TIMEOUT_ERROR;    // timeout errors override all others
+    waiting = NO;                                   // reset this flag
+    return (tx_error == NO_ERROR);                  // returns true if all good, false if there's an error
 }
 
 
@@ -1824,7 +1880,7 @@ unsigned char receive_message(void)
 //================ Janus Phone board routines ================================//
 ////////////////////////////////////////////////////////////////////////////////
 
-void reset_phone_UART(void)
+void reset_phone_uart(void)
 {
     PHONE_UART_RESET;            // Reset the UART for the phone
     __no_operation();
@@ -1840,7 +1896,7 @@ void reset_phone_UART(void)
     PHONE_INTERRUPT_DISABLE;    // no interrupts
 }
 
-void phone_UART_off(void)
+void phone_uart_off(void)
 {   PHONE_UART_RESET;
     // Pins 2.5 and 2.6 used for Phone UART
     P2SEL1 &= ~( BIT5 | BIT6 ); // remove the UART designation for these pins
@@ -1851,14 +1907,14 @@ void phone_UART_off(void)
 
 
         // Sends an AT code or string to the phone
-void sendMessage(unsigned char message_code)    // the array number of the pointers is passed
+void send_message(unsigned char message_code)    // the array number of the pointers is passed
 {   unsigned char AT_tx_char;                   // The character we will send out
     unsigned char last_char;                    // the last character sent
     unsigned int buffer_count;                  // a counter while scanning the buffer
     unsigned char cr_count;                     // counting carriage returns
     unsigned char *string2send;                 // we'll put the pointer here
     while(PHONE_TX_NOT_READY);                  // wait for previous byte to complete
-    reset_phone_UART();
+//    reset_phone_uart();
     not_timed_out = YES;        //TODO// make timeouts work!
     buffer_count = 0;
     string2send = messages[message_code];       // get the pointer out of the array
@@ -1873,12 +1929,12 @@ void sendMessage(unsigned char message_code)    // the array number of the point
     }
     while (cr_count)
     {   while (PHONE_RX_BUFF_EMPTY);     // wait for data
-        if ((incoming.uart[buffer_count++] = PHONE_RX_BUFF) == ASCII_CR) cr_count-- ;
+        if ((phone_buffer[buffer_count++] = PHONE_RX_BUFF) == ASCII_CR) cr_count-- ;
     }
-    if ((message_code==AT_CREG) && (buffer_count > 9)) connection_code = (incoming.uart[9]-0x30) ; // return CREG registration code
+    if ((message_code==AT_CREG) && (buffer_count > 9)) connection_code = (phone_buffer[9]-0x30) ; // return CREG registration code
     if ( last_char == ASCII_CR)     // At the end of all lines
     {   if (message_code < CR)         // At the end of all all AT command lines
-//        {   if (buffer_count) error_code = (incoming.uart[0]-0x30); //Error codes from AT commands 0= no error
+//        {   if (buffer_count) error_code = (phone_buffer[0]-0x30); //Error codes from AT commands 0= no error
             wait(980);                      //wait a second between AT commands
 //        }
         blink(1);                               // blink as we process messages
@@ -1891,9 +1947,9 @@ void do_script(const char *script)  //pass the pointer to the script array
 {   unsigned char code;             // the command codes in the script
     const char *script_ptr;         // This pointer we can change
     script_ptr = script;            // set it to point to the script
-    reset_phone_UART();             // clear out the buffers before starting
+    reset_phone_uart();             // clear out the buffers before starting
     while (code = *script_ptr)      // get the code pointed to in the script array
-    {   sendMessage(code);          // send the message with that code
+    {   send_message(code);          // send the message with that code
         script_ptr++;               // point to the next character in the script
         if ((code == END_OF_FILENAME) && (error_code == 4)) script_ptr = script; // reset the pointer and restart the script if there is a problem opening files
     }
@@ -1902,23 +1958,24 @@ void do_script(const char *script)  //pass the pointer to the script array
 
 
         // get an internet connection with the phone board
-void makeConnection(void)
+void make_connection(void)
 {
-    sendMessage(AT_NO_ECHO);        // Send the AT command to turn off echo and verbose responses
+    reset_phone_uart();                 // make sure the UART is ready
+    send_message(AT_NO_ECHO);           // Send the AT command to turn off echo and verbose responses
                 // TODO // Modify so that this will work with all Janus boards automatically.
                 // The AT_NO_ECHO command waits for four CRs for use with an HE910.
                 // There is a message "+PACSP0" when it connects to the network.
-    sendMessage(AT_GPS_OFF);        // Turn off GPS if comm tower, turn on if hand-held unit
-    sendMessage(AT_SET_RTC);        // Set phones RTC from network time automatically
+    send_message(AT_GPS_OFF);           // Turn off GPS if comm tower, turn on if hand-held unit
+    send_message(AT_SET_RTC);           // Set phones RTC from network time automatically
     connection_code = CELL_NOT_REGISTERED;       // reset connection code
-    sendMessage(AT_CREG);           // Send AT code to request a registration report
+    send_message(AT_CREG);              // Send AT code to request a registration report
     while ( (connection_code != CELL_REGISTERED) && (connection_code !=ROAMING) )   // added roaming
         // Keep trying until there is a connection
     {
-        wait_a_sec(1);              // wait a second before trying again
-        reset_phone_UART();         // reset the UART if that is the problem
-        sendMessage(AT_CREG);       // Send AT code to request a registration report
-    }                               // TODO // better error handling!
+        wait_a_sec(1);                  // wait a second before trying again
+        reset_phone_uart();             // reset the UART if that is the problem
+        send_message(AT_CREG);          // Send AT code to request a registration report
+    }                                   // TODO // error handling!
 }
 
 
@@ -1963,13 +2020,13 @@ void set_time(void)
     unsigned int current_day;
  // unsigned int start_month;
     unsigned int current_month;
-    move_string(messages[REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
-    reset_phone_UART();                                         // empty the buffers
-    sendMessage(AT_GET_TIME);                                   // request network time
-    move_string(incoming.uart, 8, 17, messages[REPORT_TIME], 2);// move the date and time
-    move_string(incoming.uart, 8, 2, messages[DATE_TODAY], 2);// move the year
-    move_string(incoming.uart, 11, 2, messages[DATE_TODAY], 5);// move the month
-    move_string(incoming.uart, 14, 2, messages[DATE_TODAY], 8);// move the day
+    move_string(messages[LAST_REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
+    reset_phone_uart();                                         // empty the buffers
+    send_message(AT_GET_TIME);                                   // request network time
+    move_string(phone_buffer, 8, 17, messages[REPORT_TIME], 2);// move the date and time
+    move_string(phone_buffer, 8, 2, messages[DATE_TODAY], 2);// move the year
+    move_string(phone_buffer, 11, 2, messages[DATE_TODAY], 5);// move the month
+    move_string(phone_buffer, 14, 2, messages[DATE_TODAY], 8);// move the day
 //    start_month =  ascii2int(messages[INSTALLED], 5, 2);        // convert 2 ASCII month chars to a single byte
 //    start_day =  ascii2int(messages[INSTALLED], 8, 2);          // convert 2 ASCII day chars to a single byte
     current_month = ascii2int(messages[REPORT_TIME], 5, 2);     // convert 2 ASCII month chars to a single byte
@@ -2009,27 +2066,27 @@ void get_new_parameters(void)
         message_ptr = messages[SENSOR_ID];          // point to the sensor ID
         do_script(read_parameters);                 // download the file
         while(PHONE_RX_BUFF_EMPTY);                 // wait for a byte
-        incoming.uart[0] = PHONE_RX_BUFF;           // store the byte received in a buffer
-        if (incoming.uart[0] != 0x31) continue;     //first byte should be a "1"
+        phone_buffer[0] = PHONE_RX_BUFF;           // store the byte received in a buffer
+        if (phone_buffer[0] != 0x31) continue;     //first byte should be a "1"
         for(datacount=1; datacount < 0x33; datacount++) // read in the file
         {   while(PHONE_RX_BUFF_EMPTY);             // wait for a byte
-            incoming.uart[datacount] = PHONE_RX_BUFF;   // store the byte received in a buffer
+            phone_buffer[datacount] = PHONE_RX_BUFF;   // store the byte received in a buffer
         }
         checksum=0;                                 // start the checksum at zero
         for(datacount=2; datacount < 0x30; datacount++) // verify the file
-        {   if (datacount < 0x08) if (incoming.uart[datacount] != *message_ptr++) continue; // verify the sensor ID
-            checksum += incoming.uart[datacount];   // add to the checksum
+        {   if (datacount < 0x08) if (phone_buffer[datacount] != *message_ptr++) continue; // verify the sensor ID
+            checksum += phone_buffer[datacount];   // add to the checksum
         }
-        if (checksum == ((incoming.uart[0x30]<<8) + incoming.uart[0x31])) bad_checksum = FALSE;
+        if (checksum == ((phone_buffer[0x30]<<8) + phone_buffer[0x31])) bad_checksum = FALSE;
                                                     // confirm the check-sum
     }                                               // try again if there is an error.  Give up after 2 tries.
     wait(980);                                      // pause before delete
     if (!bad_checksum)                              // double negative if a good file load
-    {   move_string(incoming.uart, 8, PARAM_BYTES, new_parameters, 0);  // save the downloaded parameters
+    {   move_string(phone_buffer, 8, PARAM_BYTES, new_parameters, 0);  // save the downloaded parameters
         do_script(delete_parameters);               // delete file if successful
         new_parameters_loaded = YES;                //set flag for report message
     }
-    sendMessage(AT_FTP_CLOSE);        // close FTP connection
+    send_message(AT_FTP_CLOSE);        // close FTP connection
 }
 
 
@@ -2037,11 +2094,11 @@ void get_new_parameters(void)
 void set_report_frequency(void)
 {
     // adjust the new parameters and send them out
-    NEW_SLOWBIN_LO_NOW = NEW_SLOWBIN_LO;    // reset parameters[16] and [17] to the slow day settings
-    NEW_SLOWBIN_HI_NOW =NEW_SLOWBIN_HI;
+    NEW_SLOWREC_LO_NOW = NEW_SLOWREC_LO;    // reset parameters[16] and [17] to the slow day settings
+    NEW_SLOWREC_HI_NOW =NEW_SLOWREC_HI;
     if (day_count >= NEW_SLOW_DAYS)        // first approximation, wait 40 days and then go fast
-    {   NEW_SLOWBIN_LO_NOW = NEW_BINSEC_LO;    // reset parameters[16] and [17] to the slow day settings
-        NEW_SLOWBIN_HI_NOW = NEW_BINSEC_HI;
+    {   NEW_SLOWREC_LO_NOW = NEW_RECSEC_LO;    // reset parameters[16] and [17] to the slow day settings
+        NEW_SLOWREC_HI_NOW = NEW_RECSEC_HI;
     }
     // send the parameters to the sensor
 
@@ -2054,7 +2111,7 @@ void set_report_frequency(void)
 // send out a nibble as an ASCII hexadecimal number from 0 to F
 void send_nibble(unsigned char nibble)      // pass the nibble and we'll convert it
 {   if (nibble > 0x09) nibble += 7;         // add 7 if the nibble is ten or more
-    while(PHONE_TX_NOT_READY);             // wait for the UART to finish
+    while(PHONE_TX_NOT_READY);              // wait for the UART to finish
     PHONE_TX_BUFF = (nibble + 0x30);        // Send the byte converted to ASCII
 }
 
@@ -2069,38 +2126,38 @@ void send_byte(unsigned char data_byte)     // pass the byte to send
 // sends out an integer in four nibbles
 void send_integer(unsigned int data_integer)
 {
-    send_byte((data_integer & 0xFF00)>>8);  // print the high byte of recCount
-    send_byte(data_integer & 0x00FF);       // print the low byte of recCount
+    send_byte((data_integer & 0xFF00)>>8);  // print the high byte of rec_count
+    send_byte(data_integer & 0x00FF);       // print the low byte of rec_count
 }
 
 void escape_and_close(void)
-{   wait(2000);                                 // add 2 seconds before and after escape routine
-    sendMessage(AT_FTP_ESCAPE);                 // send the escape message
-    wait(2000);                                 //  2 seconds after escape routine
-    sendMessage(AT_FTP_CLOSE);                  // close ftp connection
+{   wait(2000);                             // add 2 seconds before and after escape routine
+    send_message(AT_FTP_ESCAPE);            // send the escape message
+    wait(2000);                             //  2 seconds after escape routine
+    send_message(AT_FTP_CLOSE);             // close ftp connection
 }
 
 
 // send out records in the report
 void report_record_data(void)
-{   unsigned int report_count;
+{   unsigned char line_count;
     unsigned char char_count;
     not_timed_out = YES;        //TODO// make timeouts work!
-    for (report_count = 0; report_count < recCount; report_count++)
+    for (line_count = 0; line_count < recs_reported; line_count++)
     {   if (PARAM_REPORT_HEADINGS)          // if report headings are desired
-        {   send_integer(report_count);     // send a count
-            sendMessage(COMMA);             // send a comma
+        {   send_integer(line_count);       // send a count
+            send_message(COMMA);            // send a comma
         }
-        reset_phone_UART();
+//        reset_phone_uart();
 //        PHONE_TX_ENABLE;
-        for (char_count = 0; char_count < 32; char_count +=2)   // go through them two by two
-        {   send_byte(data.bytes[report_count][char_count]);       // send first byte of data
-            send_byte(data.bytes[report_count][char_count+1]);     // send second byte of data
-            if (char_count < 30 ) sendMessage(COMMA);           // send a comma except at the end of the line
+        for (char_count = 0; char_count < RECORD_BYTES; char_count +=2) // go through them two by two
+        {   send_byte(data.energy[line_count][char_count]);             // send first byte of data (high)
+            send_byte(data.energy[line_count][char_count+1]);           // send second byte of data (low)
+            if (char_count < RECORD_BYTES ) send_message(COMMA);        // send a comma except at the end of the line
         }
-        sendMessage(CR);            // send a carriage return
+        send_message(CR);            // send a carriage return
     }
-    wait(2);                        // make certain there is enough time to finish transmission.
+    while(PHONE_TX_NOT_READY);       // wait for the UART to finish
 }
 
 
@@ -2108,36 +2165,34 @@ void send_report(void)
 {   if (PARAM_REPORT_HEADINGS)              // If the parameter is set to print report headings
     {   do_script(report_script);           // send script commands to open FTP and create a file
                                             // also creates most of the file header
-        send_byte(PARAM_SLOWBIN_HI_NOW);    // High byte of seconds per record
-        send_byte(PARAM_SLOWBIN_LO_NOW);    // Low byte of seconds per record
-        sendMessage(TXT_NUM_RECS);          // # of records
-        send_integer(recCount);             // print the recCount
-        sendMessage(TXT_BATTERY_LEVEL);     // battery level
-        send_integer(battery_level );       // print the battery level
-        sendMessage(CR);                    // send a carriage return
-        sendMessage(CR);                    // send a carriage return
-        sendMessage(TXT_HEADINGS);          // headings for record data
+        send_byte(PARAM_SLOWREC_HI_NOW);    // High byte of seconds per record
+        send_byte(PARAM_SLOWREC_LO_NOW);    // Low byte of seconds per record
+        send_message(TXT_NUM_RECS);         // # of records
+        send_integer(recs_reported);        // print the rec_count
+        send_message(TXT_BATTERY_LEVEL);    // battery level
+        send_integer(battery_level);        // print the battery level
+        do_script(ODR_script);
     }
     else                                    // Otherwise print the report without headings
     {   do_script(report_script_noheading); // which uses a different script
-        send_byte(PARAM_SLOWBIN_HI_NOW);    // High byte of seconds per record
-        send_byte(PARAM_SLOWBIN_LO_NOW);    // Low byte of seconds per record
-        sendMessage(CR);                    // send a carriage return
-        send_integer(recCount);             // print the recCount
-        sendMessage(CR);                    // send a carriage return
+        send_byte(PARAM_SLOWREC_HI_NOW);    // High byte of seconds per record
+        send_byte(PARAM_SLOWREC_LO_NOW);    // Low byte of seconds per record
+        send_message(CR);                   // send a carriage return
+        send_integer(recs_reported);        // print the rec_count
+        send_message(CR);                   // send a carriage return
         send_integer(battery_level );       // print the battery level
-        sendMessage(CR);                    // send a carriage return
-        sendMessage(CR);                    // send a carriage return
-        sendMessage(CR);                    // send a carriage return
+        send_message(CR);                   // send a carriage return
+        send_message(CR);                   // send a carriage return
+        send_message(CR);                   // send a carriage return
     }
     report_record_data();                   // send all the data
                                                                 // conditional lines sent at the end
-    if (new_parameters_loaded) sendMessage(TXT_NEW_SETTINGS);   // send new parameters loaded message
-    if (force_shut_down) sendMessage(TXT_LOW_BATTERY);          // send shutdown warning
-    if (wd_reset) sendMessage(TXT_RESET);                       // send reset message
-    if (starting_up) sendMessage(TXT_MONITORING);               // send startup message
-    if (!sensor_plugged_in) sendMessage(TXT_DISCONNECTED);     // send sensor disconnect message
-    if (PARAM_REPORT_HEADINGS) do_script(end_report);           // closing messages
+//    if (new_parameters_loaded) send_message(TXT_NEW_SETTINGS);  // send new parameters loaded message
+//    if (force_shut_down) send_message(TXT_LOW_BATTERY);         // send shutdown warning
+//    if (wd_reset) send_message(TXT_RESET);                      // send reset message
+//    if (starting_up) send_message(TXT_MONITORING);              // send startup message
+//    if (!sensor_plugged_in) send_message(TXT_DISCONNECTED);     // send sensor disconnect message
+//    if (PARAM_REPORT_HEADINGS) do_script(end_report);           // closing messages
                                                 // finish up
     new_parameters_loaded = NO;                 // clear the new parameters flag
     wd_reset = NO;                              // clear the reset flag
@@ -2150,24 +2205,27 @@ void send_log_line(void)
 {   do_script(log_line);            // A line of log data (Date, time, Comm and SensorIDs and "Event: ")
     switch (sensor_status[slot_count])    // end the line depending upon the current status
     {   case RECENTLY_CONNECTED:                // if we just connected
-            sendMessage(TXT_MONITORING);        // send startup message
+            send_message(TXT_MONITORING);        // send startup message
             break;
         case RECENTLY_DISCONNECTED:             // if we just disconnected
-            sendMessage(TXT_DISCONNECTED);      // send sensor disconnect message
+            send_message(TXT_DISCONNECTED);      // send sensor disconnect message
             break;
         case NEW_PARAMETERS_FOUND:              // if new parameters were just loaded
-            sendMessage(TXT_NEW_SETTINGS);      // send the parameters message
+            send_message(TXT_NEW_SETTINGS);      // send the parameters message
             break;
     }
     escape_and_close();           // this closes the current log file
 }
 
+//////////report_event
+// send a line of a log to the sensor log and the activity log
 void report_event(void)
 {   do_script(next_sensor_log);         // send script commands to open FTP and create a file
     send_log_line();
     do_script(activity_log);
     send_log_line();
 }
+
 
 ////////////////send_census()
 // sends out a list of new devices connected or disconnected
@@ -2181,7 +2239,7 @@ void report_event(void)
 void send_census(void)
 {   for (slot_count = 2; slot_count < SENSOR_SLOTS; slot_count++)
     {   if (sensor_status[slot_count] > NO_UNREPORTED_CHANGE)  // If non-zero the sensor was either recently connected or disconnected
-        {   move_string(sensor_ids[slot_count], 0, 9, messages[SENSOR_ID], 0);// move the sensor_id
+        {   move_string(sensor_ids[slot_count], 0, SERIAL_ID_LEN, messages[SENSOR_ID], 0);// move the sensor_id
             report_event();                 // update the logs
             get_new_parameters();           // upload a new set of paramters if they are available
             if (new_parameters_loaded)
@@ -2190,6 +2248,7 @@ void send_census(void)
                 //TODO// send the new parameters to the sensor
             }
             sensor_status[slot_count] = NO_UNREPORTED_CHANGE;
+            wait_a_sec(1);       // pause between reports
         }
     }
    watchdog_reset();               // reset the watchdog timer
@@ -2244,7 +2303,7 @@ void phone_off(void)
     }
     PHONE_POWER_DISABLE;        // Turn off the phone power
     PHNMON_LED_OFF;
-    phone_UART_off();           // disable the UART
+    phone_uart_off();           // disable the UART
 }
 
 
@@ -2265,7 +2324,7 @@ void power_down()
 ////// report_in
 // send in a status report
 void report_in(void)
-{   makeConnection();               // wait for the phone to establish an internet connection
+{   make_connection();               // wait for the phone to establish an internet connection
     wait_a_sec(1);
     set_time();                     // reads RTC from the phone and saves it in messages
                                     //puts today's date inf the file name for the activity log
@@ -2275,35 +2334,124 @@ void report_in(void)
 }
 
 
+// CLEAR THE TEMPORARY BINS
+// deletes all data from the temporary bins after they have been saved as a record
+void clear_temp_bins(void)
+{   for (bin =  0; bin < JOLT_BITS; bin++) adxl_bins[bin] = 0;
+}
+
+
+void clear_record(void)
+{ unsigned char z;
+    if (rec_count)       // Check that there is a record to erase!
+    {   rec_count--;     // Decrement the count of how many records have been collected since last upload
+        for (z = 0; z < DATA_SIZE; z++) data.energy[rec_count][z] = 0;  // erase the record
+        rec_secs = 0;    // Reset the number of seconds that the current record has been active
+    }
+}
+
+
+void clear_all_records(void)
+{   rec_count = MAX_RECORDS;         // Make sure they are all errased
+    while(rec_count) clear_record(); // clear them all until they are all empty
+    sec_count = 0;                   // The number of seconds since last upload
+    clear_temp_bins();              // Erase these too.
+}
+
+
+unsigned char send_records(void)
+{ unsigned char data_count;
+    for (data_count = 0; ((data_count < PARAM_RECORD_BUNCH) && (record_number < rec_count)); data_count++)
+            // send a bunch at a time until we've finished a bunch or sent the last record completed
+    {
+        move_string(data.energy[record_number],0, RECORD_BYTES, coax_buffer, 0 );
+            // this step is only needed to keep the timing of sending a receiving in synch
+            // the data could have been sent directly without moving it to the buffer first
+            // but the sending side would get ahead of the recieving side.
+            // The sender always needs to be slower than the receiver.
+        error_code = coax_long_message(DATA, record_number, (record_number < rec_count), coax_buffer, RECORD_BYTES) ;
+        // (DATA = command that we are sending data,
+        //  record_number = the record number being sent,
+        //  (record_number < rec_count-1) is whether there are more records to send (YES or NO).
+        //  The current record (= rec_count) is not sent because it is not finished,
+        //  coax_buffer is the pointer to the data,
+        //  RECORD_BYTES = data length)
+        record_number++;
+    }
+    if (record_number < rec_count- 1)  // returns YES if there are more records to send, NO if we are done.
+    {
+        return(YES);
+    }
+    else
+    {
+        clear_all_records();    //TODO// Add some error checking or confirmation before deleting?
+        // the current record will be stored in record zero because rec_count is reset.
+        status = BUSY;
+        return(NO);
+    }
+}
+
+
+
+
+
+
 // PHONE IN DATA
 // Turn on the phone and create a report
 void phone_in(void)
-{   //TODO// Update to send multiple reports for multiple sensors
-//    phone_on() must be called before this routine.
-  unsigned int y;
-  unsigned char z;
-    makeConnection();               // wait for the phone to establish an internet connection
+{   // Updated to send multiple reports for multiple sensors
+    // phone_on() must be called before this routine.
+  unsigned char device_reporting;
+  unsigned char more_records;
+  unsigned char data_count;
+    make_connection();               // wait for the phone to establish an internet connection
+    set_time();                         // reads RTC from the phone and saves it in messages
+    move_string(messages[REPORT_TIME], 0, 19, messages[LAST_REPORT_TIME], 0);  // move old report time to start time
     wait_a_sec(1);
-    set_time();                     // reads RTC from the phone and saves it in messages
-    // increment the report count, start over if it is a new day
-//    if (day_count!= last_day_count) move_string("00", 0, 2, messages[DAYS_NUM], 4);   // move the two zeros to the string
-//    int2ascii(ascii2int(messages[DAYS_NUM], 4, 2) + 1, messages[DAYS_NUM], 4, 2);   // increment report count
-//    int2ascii(day_count, messages[DAYS_NUM], 0, 3);   //put the count into the string
-//    last_day_count = day_count;     // save the count for next time
-    send_report();                  // generate a report
-    move_string(new_parameters, 0, PARAM_BYTES, parameters, 0); // save the current parameters to print out later
-    get_new_parameters();      // upload a new set of paramters if they are available
-    if (new_parameters_loaded)
-     {   sensor_status[slot_count] = NEW_PARAMETERS_FOUND;
-         //todo// send new parameters to sensor
-         send_census();              // send the census of newly loaded parameters
-     }
+    for (device_reporting = 2; device_reporting < interval_limit; device_reporting++)
+    {   // might as well report all the devices when the first is ready.
+        // they will all synch up together and report as frequently as the most frequent device.
+        if (sensor_slot[device_reporting])      // only report if something is connected!
+        {
+            going_to_unit = device_reporting;   // set up communication with the correct device
+            set_time();                         // reads RTC from the phone and saves it in messages
+        //    increment the report count, start over if it is a new day
+        //    if (day_count!= last_day_count) move_string("00", 0, 2, messages[DAYS_NUM], 4);   // move the two zeros to the string
+        //    int2ascii(ascii2int(messages[DAYS_NUM], 4, 2) + 1, messages[DAYS_NUM], 4, 2);   // increment report count
+        //    int2ascii(day_count, messages[DAYS_NUM], 0, 3);   //put the count into the string
+        //    last_day_count = day_count;       // save the count for next time
+            intervals_on = YES;                 // timing interupts back on
+            move_string(sensor_ids[device_reporting], 0, SERIAL_ID_LEN, messages[SENSOR_ID], 0); // move the ID to the appropriate string.
+            more_records = YES;                 // start out expecting something
+            recs_reported = 0;                  // no records received yet
+            wait_for_cycle(1);                  // get in synch with the device after turning on the phone or sending a report
+            coax_short_message(SEND_DATA);      // tell the device to send data
+            while (more_records)                // if there are more records coming
+            {   for (data_count = 0; ((data_count < PARAM_RECORD_BUNCH) && (more_records)); data_count++) // get a bunch of them
+                {
+                    receive_message();          // they come one per message
+                    rec_count = parameter_one;  // parameter one will tell us the record number
+                    more_records=parameter_two; // parameter two will tell us to expect more or not
+                    move_string(coax_buffer, 0, RECORD_BYTES, data.energy[rec_count], 0 );
+                                                // move the data from the buffer to the array
+                    recs_reported++ ;           // count how many there are to send
+                }
+                ENTER_LOW_POWER_MODE_3;         // wait until the next interval after each bunch
+            }                                   // continue unitl there are no more to receive
+            intervals_on = NO;                  // no timing interupts for now
+            send_report();                      // generate a report
+ //           move_string(new_parameters, 0, PARAM_BYTES, parameters, 0); // save the current parameters to print out later
+ //           get_new_parameters();      // upload a new set of paramters if they are available
+ //           if (new_parameters_loaded)
+//            {   sensor_status[slot_count] = NEW_PARAMETERS_FOUND;
+            //todo// send new parameters to sensor
+ //               send_census();              // send the census of newly loaded parameters
+ //           }
+            watchdog_reset();               // reset the watchdog timer
+        }
+    }
     phone_off();                    // turn the phone module off
-    watchdog_reset();               // reset the watchdog timer
-    // erase the previously uploaded data
-    for (y = 0; y < MAX_RECORDS; y++) for (z = 0; z < 32; z++) data.bytes[y][z] = 0;  // Erase the entire array
-    recCount = 0;                   // The count of how many records have been collected since last upload
-    secCount = 0;                   // Reset the secCount counter
+    sec_count = 0;                   // Reset the sec_count counter
 }
 
 
@@ -2337,7 +2485,7 @@ void interval(unsigned char intervals)
 }
 
 
-void reset_SPI(void)
+void reset_spi(void)
 {   wait(1);
     ADXL_UART_RESET;                    // Reset the SPI
     __no_operation();
@@ -2356,12 +2504,14 @@ char receive_byte(void)
 
 
 // READ data from the ADXL sensor FIFO stack
-void ADXL_FifoRead(void)
+void adxl_fifo_read(void)
 // Reading from the ADXL's FIFO buffer is a command structure that does not have an address.
 // </CS down> <command byte (0x0D)> <data byte> <data byte> … </CS up>
 {   unsigned int x;             // all purpose counter
-    unsigned int temp;          // temporary storage for a read
-    reset_SPI();                // confirm that SPI is enabled
+    unsigned char temp;         // temporary storage for a read
+    unsigned int temp_value;    // A place to store bytes temporarily so we can build integers
+    unsigned char *p = (unsigned char*)&temp_value; // we'll store the interger pieces in p[1] and p[0]
+    reset_spi();                // confirm that SPI is enabled
     while(ADXL_BUSY);           // Make sure no activity is happening
     ADXL_SELECT;                // Select the chip by setting STE pin low
     __no_operation();           // let the ADXL settle (is this needed?)
@@ -2375,11 +2525,11 @@ void ADXL_FifoRead(void)
     for( x = 0; x < DATA_BUFFER_SIZE-1; x++ )     // Fill up the buffer with the data from the stack.  The first is junk
     {   while(ADXL_TX_NOT_READY) ;     // wait for the TX buffer to empty
         ADXL_TX_BUFF= 0xFF;            // Send another dummy byte to push data off the stack
-        incoming.spi[x] = UCA1RXBUF;   // get the byte from the previous send
+        p[0] = UCA1RXBUF;              // get the byte from the previous send
         while(ADXL_TX_NOT_READY) ;     // wait for the TX buffer to empty
         ADXL_TX_BUFF= 0xFF;            // Send another dummy byte to push the next data off the stack
-        temp = UCA1RXBUF ;             // get the byte that just finished
-        incoming.spi[x] |= (temp<<8) ; //  add the second byte * 256
+        p[1] = UCA1RXBUF ;             // get the byte that just finished
+        spi_buffer[x] = temp_value ;   // store the two bytes as an integer
     }
     while(ADXL_TX_NOT_READY) ;    // wait for SPI module to finish up
     temp = UCA1RXBUF;   // get the last byte
@@ -2412,7 +2562,7 @@ signed int read_temperature(unsigned char temp_readings)
         readings<<= 1;                  // multiply the number of readings by 2
         temp_readings--;                // one less time to loop
     }
-    reset_SPI();                        // confirm that SPI is enabled
+    reset_spi();                        // confirm that SPI is enabled
     temp_temp = 0;                      // start out with zero temporary temperature
     for (; readings; readings--)        // This is looped multiple times for an average reading
     {
@@ -2460,22 +2610,26 @@ void process_bin_data(void)
     signed long int mag_squared;            // absolute magnitude of vector squared (dX^2 + dY^2 +dZ^2)
         //Skip over bad data and synch up with the good data
     not_first_read = NO;
-    for (x=0; x< DATA_BUFFER_SIZE-3 && !( ((incoming.spi[x] & X_READING) == X_READING) &&
-                                        ((incoming.spi[x+1] & Y_READING) == Y_READING) &&
-                                        ((incoming.spi[x+2] & Z_READING) == Z_READING)  );   x++ );
+    for (x=0; x< DATA_BUFFER_SIZE-3 && !( ((spi_buffer[x] & X_READING) == X_READING) &&
+                                        ((spi_buffer[x+1] & Y_READING) == Y_READING) &&
+                                        ((spi_buffer[x+2] & Z_READING) == Z_READING)  );   x++ );
     while (x<DATA_BUFFER_SIZE)
     {           // process good data to find the "jerk" (third derivative of displacement)
-        tempX=incoming.spi[x];
-        tempY=incoming.spi[x+1];
-        tempZ=incoming.spi[x+2];
-        if (    ((tempX & XYZ_PINS) == X_READING) &&
-                ((tempY & XYZ_PINS) == Y_READING) &&
-                ((tempZ & XYZ_PINS) == Z_READING) )     // process only non-zero readings
+        tempX=spi_buffer[x];    // store x so we can use it several times efficiently
+        spi_buffer[x] = 0;      // erase the buffer for next time
+        tempY=spi_buffer[x+1];  // same for y
+        spi_buffer[x+1] = 0;
+        tempZ=spi_buffer[x+2];  // same for z
+        spi_buffer[x+2] = 0;
+                                                        // process only non-zero readings
+        if (    ((tempX & XYZ_PINS) == X_READING) &&    // X readings start with top two bits = 00
+                ((tempY & XYZ_PINS) == Y_READING) &&    // Y readings start with top two bits = 01
+                ((tempZ & XYZ_PINS) == Z_READING) )     // Z readings start with top two bits = 11
         {        // make the data proper 16 bit integers
             aX= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
             aY= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
             aZ= (tempZ & ADXL_MASK) | ((tempZ & NEG_MASK)<<2);
-            if ( not_first_read )       // process the result into the bins
+            if ( not_first_read )       // sum up the deltas with the previous readings
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
                 dX= (aX - aXlast);               // compute the differences
@@ -2487,16 +2641,16 @@ void process_bin_data(void)
                 for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
                     //mask off one bit and see if it is zero
                     bin_mask >>= 1 ;            // if so move the mask over one bit to the right and look at the next bin
-                buffer.bins[bin_count]++ ;      // increment the appropriate bin
-                data.bins[recCount][READINGS]++ ;    // increment the number of readings
+                adxl_bins[bin_count]++ ;      // increment the appropriate bin
+                data.bins[rec_count][READINGS]++ ;    // increment the number of readings
             }
             else
             {   not_first_read = TRUE ;
                         // Save the first reading off the stack in the orientation log
             // TODO // make this an average reading
-                data.bins[recCount][X_POS] = aX;
-                data.bins[recCount][Y_POS] = aY;
-                data.bins[recCount][Z_POS] = aZ;
+                data.bins[rec_count][X_POS] = aX;
+                data.bins[rec_count][Y_POS] = aY;
+                data.bins[rec_count][Z_POS] = aZ;
             }           // save the reading for next time in aXold, aYold, and aZold
             aXlast = aX;
             aYlast = aY;
@@ -2528,19 +2682,24 @@ void integrate_data(void)
     unsigned char odr_count;        // counts from 0 to 5 for the different ODRs
                                     // 0 = 400, 1 = 200, 2 = 100, 3 = 50, 4 = 25 and 5 = 12.5
     unsigned long int integration;  // Temporary integration value
-    unsigned char bits_2_shift;     // the number of bits to shift to divide the totals to get averages
+    unsigned int temp_value;        // A place to store integers temporarily so we can break them in half
+    unsigned char *p = (unsigned char*)&temp_value;
     //Skip over bad data and synch up with the good data
-    for (x=0; x< DATA_BUFFER_SIZE-3 && !( ((incoming.spi[x] & X_READING) == X_READING) &&
-                                        ((incoming.spi[x+1] & Y_READING) == Y_READING) &&
-                                        ((incoming.spi[x+2] & Z_READING) == Z_READING)  );   x++ );
+    for (x=0; x< DATA_BUFFER_SIZE-3 && !( ((spi_buffer[x] & X_READING) == X_READING) &&
+                                        ((spi_buffer[x+1] & Y_READING) == Y_READING) &&
+                                        ((spi_buffer[x+2] & Z_READING) == Z_READING)  );   x++ );
     while (x<DATA_BUFFER_SIZE)
     {           // process good data to find the "jerk" (third derivative of displacement)
-        tempX=incoming.spi[x];
-        tempY=incoming.spi[x+1];
-        tempZ=incoming.spi[x+2];
-        if (    ((tempX & XYZ_PINS) == X_READING) &&
-                ((tempY & XYZ_PINS) == Y_READING) &&
-                ((tempZ & XYZ_PINS) == Z_READING) )     // process only non-zero readings
+        tempX=spi_buffer[x];    // store x so we can use it several times efficiently
+        spi_buffer[x] = 0;      // erase the buffer for next time
+        tempY=spi_buffer[x+1];  // same for y
+        spi_buffer[x+1] = 0;
+        tempZ=spi_buffer[x+2];  // same for z
+        spi_buffer[x+2] = 0;
+        // process only non-zero readings
+        if (  ((tempX & XYZ_PINS) == X_READING) &&    // X readings start with top two bits = 00
+              ((tempY & XYZ_PINS) == Y_READING) &&    // Y readings start with top two bits = 01
+              ((tempZ & XYZ_PINS) == Z_READING) )     // Z readings start with top two bits = 11
         {        // make the data proper 16 bit integers
             acc_x= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
             acc_y= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
@@ -2569,7 +2728,7 @@ void integrate_data(void)
                     dif_x= (acc_x - aXold[old_offset]);           // compute the differences for other data rates
                     dif_y= (acc_y - aYold[old_offset]);
                     dif_z= (acc_z - aZold[old_offset]);
-                    e_integrated[other_odr] += square(dif_x) + square(dif_y) + square(dif_z);
+                    e_integrated[other_odr] += ( square(dif_x) + square(dif_y) + square(dif_z) );
                     // sum the square of the differences and add to the corresponding accumulators for the other rates
                 }
             }
@@ -2582,55 +2741,79 @@ void integrate_data(void)
                 not_first_read = TRUE ;
                 sample_offset = 0;      // reset the offset cycle (goes from 0 to 31)
                 e_sample_count = 0;     // restart the count
-                bits_2_shift = e_sample_bits + 8 - fractional_bits;  // e_sample_bits and fractional bits might change
-                e_sample_limit = 0x0001 <<( e_sample_bits + 8);
-            // Save the first reading off the stack in the orientation log
-            // TODO // make this an average reading and store elswhere!
-                data.bins[recCount][X_POS] = acc_x;
-                data.bins[recCount][Y_POS] = acc_y;
-                data.bins[recCount][Z_POS] = acc_z;
-                data.bins[recCount][TEMPS] = read_temperature(3); //average 8 temperature readings
-                data.bins[recCount][MOISTURE] = read_moisture();  // save the moisture reading
+                e_sample_limit = 0x0001 << e_sample_bits; // Calculate the number of samples to collect
+            // Save the first reading off the stack
+            // TODO // make this an average reading.
+                temp_value = acc_x;
+                data.energy[rec_count][X_POS_HI] = p[1];
+                data.energy[rec_count][X_POS_LO] = p[0];
+                temp_value = acc_y;
+                data.energy[rec_count][Y_POS_HI] = p[1];
+                data.energy[rec_count][Y_POS_LO] = p[0];
+                temp_value = acc_z;
+                data.energy[rec_count][Z_POS_HI] = p[1];
+                data.energy[rec_count][Z_POS_LO] = p[0];
+                temp_value = read_temperature(3); //average 8 temperature readings
+                data.energy[rec_count][TEMP_HI] = p[1];
+                data.energy[rec_count][TEMP_LO] = p[0];
+                temp_value = read_moisture();  // save the moisture reading
+                data.energy[rec_count][MOISTURE_HI] = p[1];
+                data.energy[rec_count][MOISTURE_LO] = p[0];
             }
             // save the reading for next time in aXold, aYold, and aZold
             aXold[sample_offset] = acc_x;
             aYold[sample_offset] = acc_y;
             aZold[sample_offset] = acc_z;
             sample_offset = ((sample_offset + 1) & 0x1F );      // cycle from 0 to 31, 32 becomes 0
-            e_sample_count++;    // keep track of how many samples have been added to the fastest ODR integration
-            // finish up a record if we've reached the limit
+            e_sample_count++;   // keep track of how many samples have been added to the fastest ODR integration
+                                // finish up a record if we've reached the limit
             if (e_sample_count >= e_sample_limit)   // e_sample limit was set before we started
-            {                                       // if we've reached the limit it is time to save the results
-                data.bins[recCount][PEAK_DIF] = max_d_squared;  // save the peak diff for this record
-                max_d_squared = 0;                  // reset the peak dif for the next record
-                offset = TOP_ODR_POSITION;          // start out pointing to the correct data element
+            {                   // if we've reached the limit it is time to save the integration results
                 for (odr_count = 0; odr_count < 6; odr_count ++)    // start with the highest ODR and work our way down
                 {
                     if (odr_rate_on[odr_count])     //Skip if we didn't collect data for the OD
                     {
-                        integration = e_integrated[odr_count] >> bits_2_shift;  // divide by the number of samples (e_sample_limit)
-                        if (integration > 0xFFFF) integration = 0xFFFF;         // We only report 4 digit hex values max.
+                        integration = (e_integrated[odr_count] >> (bits_2_shift - odr_count));  // divide by the number of samples (e_sample_limit)
+                        if (integration > 0xFFFF)
+                            integration = 0xFFFF;         // We only report 4 digit hex values max.
                         if (integration > integration_max[odr_count])           // Check for a new maximum
                             integration_max[odr_count] = integration;
                         if (integration < integration_min[odr_count])           // and a new minimum for each ODR
                             integration_min[odr_count] = integration;
-                        if (recSecs >= secMax)      // Check for the end of a record
-                        {                           // store the data for the record
-                            data.bins[recCount][offset] = integration_max[odr_count];
-                            offset++;           // next data element to store
-                            data.bins[recCount][offset] = integration_min[odr_count];
-                            offset++;           // next data element to store
-                            integration_min[odr_count] = integration_max[odr_count] = integration;   //reset the max and min to the last integration
-
-                         }
                     }
                 }
-                if (recSecs >= secMax)      // Check for the end of a record
-                {
-                    recCount++;             // move on to the next record
-                    recSecs = 0;            // reset the second counter
+                not_first_read = FALSE; // starting a new integration so we just store the first reading
+            }
+            if (rec_secs >= sec_max)      // Check for the end of a record
+            {
+                offset = FIRST_ODR; // start out pointing to the correct data element
+                for (odr_count = 0; odr_count < 6; odr_count ++)    // start with the highest ODR and work our way down
+                {                       // store the data for the record
+                    temp_value = integration_min[odr_count];
+                    data.energy[rec_count][offset] = p[1];
+                    offset++;           // next data element to store
+                    data.energy[rec_count][offset] = p[0];
+                    offset++;           // next data element to store
+                    temp_value = integration_max[odr_count];
+                    data.energy[rec_count][offset] = p[1];
+                    offset++;           // next data element to store
+                    data.energy[rec_count][offset] = p[0];
+                    offset++;           // next data element to store
+                    integration_max[odr_count] =(e_integrated[odr_count] >> (bits_2_shift - odr_count) );
+                                        // divide by the number of samples (e_sample_limit)
+                    integration_min[odr_count] = integration_max[odr_count];
+                                        //reset the max and min to the last integration
                 }
-                not_first_read = FALSE ;    // starting a new integration so we just store the first reading
+                temp_value = max_d_squared;
+                data.energy[rec_count][PEAK_DIF_HI] = p[1];
+                data.energy[rec_count][PEAK_DIF_LO] = p[0];
+                                        // save the peak diff for this record
+                max_d_squared = 0;      // reset the peak dif for the next record
+                if (rec_count >= max_records)
+                    status = DATA_READY;// status is ready to report in data
+                    // data collection continues in overflow records if needed
+                if (rec_count < MAX_RECORDS - 1) rec_count++;            // move on to the next record if there is room
+                rec_secs = 0;           // reset the second counter
             }
             x += 3;             // process the next set of 3
         }
@@ -2640,11 +2823,6 @@ void integrate_data(void)
 }
 
 
-    // CLEAR THE TEMPORARY BINS
-    // deletes all data from the temporary bins after they have been saved as a record
-void clear_temp_bins(void)
-{   for (bin =  0; bin < JOLT_BITS; bin++) buffer.bins[bin] = 0;
-}
 
 
     // SEND A RECORD
@@ -2669,7 +2847,7 @@ void send_a_record(int rec2send)
 ////////////// Command 0x00 -- cycles the ADXL sensor OFF and ON
     // This is a hardware reset of the ADXL by turning off all power to the chip
     // The chip starts up with its default values in standby
-void ADXL_power_cycle(void)
+void adxl_power_cycle(void)
 {   unsigned char p2save[3], p4save[3];  // save the settings for Port 2
     // Save the settings for P2
     p2save[0] = P2OUT;  // Port 2 Port Select Register 1
@@ -2708,13 +2886,13 @@ void ADXL_power_cycle(void)
 ////////////// Command 0x01 -- turns the ADXL sensor ON
     // This takes the sensor out of standby
     // and puts it in run mode.  Checks that it is actually on.
-void ADXL_on (void)
+void adxl_on (void)
 {   unsigned char test_byte = 0;
     unsigned char x;    // count number of tries
 //    ADXL_UART_ON;
     for (x= 0; x <10; x++)  // try ten times
     {       // Prepare the SPI
-        reset_SPI();                // confirm that SPI is enabled
+        reset_spi();                // confirm that SPI is enabled
         ADXL_SELECT;          // Select the chip by setting STE pin low (P2.3)
             // Write the instruction to the ADXL to turn on
         while(ADXL_TX_NOT_READY);
@@ -2746,9 +2924,9 @@ void ADXL_on (void)
 
 ////////////// Command 0x02 -- RESET the ADXL sensor
     // Software and hardware reset of the ADXL sensor
-    // and puts the sensor in standby mode.  It still needs to be turned on using ADXL_on().
+    // and puts the sensor in standby mode.  It still needs to be turned on using adxl_on().
     // returns an error code of 1 if the sensor does not turn on after 5 tries
-char ADXL_reset(void)
+char adxl_reset(void)
 {   unsigned char reset_tries = 5;
     unsigned char ADXL_not_operational = TRUE;
     unsigned char test_byte = 0;
@@ -2757,8 +2935,8 @@ char ADXL_reset(void)
     while ( (ADXL_not_operational) && (reset_tries))    // keep resetting until things look good
     {  // TODO //  timing out.
         while (ADXL_BUSY);               // check to see if any other device is using the SPI line.
-        ADXL_power_cycle();                     // Turn off power to the ADXL and reset it
-        reset_SPI();                    // confirm that SPI is enabled
+        adxl_power_cycle();                     // Turn off power to the ADXL and reset it
+        reset_spi();                    // confirm that SPI is enabled
                     // do a software reset of the ADXL sensor
                     // ADXL SOFT RESET REGISTER Address: 0x1F, Name: SOFT_RESET
                     //  Writing Code 0x52 (representing the letter, R, in ASCII or
@@ -2777,7 +2955,7 @@ char ADXL_reset(void)
         while(ADXL_BUSY);               // wait for the last transmission to end
         ADXL_DESELECT;                  // Deselect the chip
         // initialize all the settings in standby mode
-        reset_SPI();                    // confirm that SPI is enabled
+        reset_spi();                    // confirm that SPI is enabled
         ADXL_SELECT;                    // Select the chip by setting STE pin low (P2.3)
         while(ADXL_TX_NOT_READY);       // wait for the SPI to finish
         ADXL_TX_BUFF = ADXL_WRITE;      // Tell the ADXL to write to its registers
@@ -2795,7 +2973,7 @@ char ADXL_reset(void)
         wait(10);   // wait 10 ms for the chip to wake up before taking readings (spec'd for 5)
                     // Read back the FIFO register to see if it was set correctly.
                     // If so, we can read and write to the sensor.
-        reset_SPI();                    // confirm that SPI is enabled
+        reset_spi();                    // confirm that SPI is enabled
         ADXL_SELECT;                    // Select the chip by setting STE pin low (P2.3)
         while(ADXL_TX_NOT_READY);
         ADXL_TX_BUFF = ADXL_READ;       // Tell the ADXL to transmit the data in a register
@@ -2854,14 +3032,6 @@ unsigned char calibrate(void)
 }
 
 
-// REWRITE OR DELETE IF NOT NEEDED
-////////////// Command 0x05 -- REGISTER Smart Sensor
-    // Stores new registration data from comm tower (installation, time and GPS location)
-    // Same logic as new_paramters() below.
-unsigned char register_SS(void)
-{   transfer_string(nest_ID, NEST_ID_BYTES, RECEIVE);
-    return(0);
-}
 
 // REWRITE
 ////////////// Command 0x06 -- Load NEW PARAMTERS
@@ -2880,9 +3050,18 @@ void set_new_parameters(void)
     unsigned char bit_test;
     unsigned char odrs;
         // create integers out of parameter bytes (they might have changed)
-    e_sample_bits = (PARAM_SAMPLE_BITS);            // update the sampling parameter
-    if (e_sample_bits > 0x0F) e_sample_bits = 0x0F; // check for errors, can't be more than 15
-    secMax =  (PARAM_SLOWBIN_HI_NOW<<8) | PARAM_SLOWBIN_LO_NOW ;    // The number of seconds to accumulate readings in each record (set of bins)
+    e_sample_bits = PARAM_SAMPLE_BITS;          // update the sampling parameter
+    fractional_bits = PARAM_FRACTIONAL_BITS;    // this is the portion of the reported values that is fractional
+    if (fractional_bits > 0x0F)
+        fractional_bits = 0x0F;                 // check for errors, can't be more than 15
+    if (e_sample_bits > 0x0F)
+        e_sample_bits = 0x0F;                   // check for errors, can't be more than 15
+    if (e_sample_bits < fractional_bits)
+        fractional_bits = e_sample_bits;        // bits_2_shift can't be negative
+    bits_2_shift = e_sample_bits - fractional_bits;  // e_sample_bits and fractional bits can change
+    if (bits_2_shift < 5)
+        bits_2_shift = 5;                       // must be at least 5 so that lower ODRs are correct
+    sec_max =  (PARAM_SLOWREC_HI_NOW<<8) | PARAM_SLOWREC_LO_NOW ;    // The number of seconds to accumulate readings in each record (set of bins)
     max_run_time = PARAM_MAXRUN4H;
     for(offset=20; offset>17; offset--)
     {   max_run_time <<= 8;
@@ -2896,9 +3075,9 @@ void set_new_parameters(void)
                         // Check the bit, if it is set, store a YES, otherwise a NO
         bit_test <<= 1;     // next bit
     }
-    maxRecords = (PARAM_MAX_RECORDS_HI<<8) | PARAM_MAX_RECORDS_LO;  // The maximum number of records to collect
-//    ADXL_power_cycle();                         //  turn the sensor off!
-//    error_code = ADXL_reset();          // reset the ADXL and load the new parameters
+    max_records = ((PARAM_MAX_RECORDS_HI<<8) | PARAM_MAX_RECORDS_LO);  // The maximum number of records to collect
+//    adxl_power_cycle();                         //  turn the sensor off!
+//    error_code = adxl_reset();          // reset the ADXL and load the new parameters
 //    return(0);
 }
 
@@ -2906,50 +3085,22 @@ void set_new_parameters(void)
 ////////////// Command 0x07 -- CLEAR last RECORD
     // Erases the last record and lowers the count
     // Also used by clear_all_records() to erase all the records
-void clear_record(void)
-{ unsigned char z;
-    if (recCount)       // Check that there is a record to erase!
-    {   recCount--;     // Decrement the count of how many records have been collected since last upload
-        for (z = 0; z < DATA_SIZE; z++) data.bins[recCount][z] = 0;  // erase the record
-        recSecs = 0;    // Reset the number of seconds that the current record has been active
-    }
-}
 
 
 ////////////// Command 0x08 -- CLEAR ALL the RECORDS
     // erase all data and resets the counts
-void clear_all_records(void)
-{   recCount = MAX_RECORDS;         // Make sure they are all errased
-while(recCount) clear_record(); // clear them all until they are all empty
-secCount = 0;                   // The number of seconds since last upload
-clear_temp_bins();              // Erase these too.
-}
+
 
 //REWRITE
 ////////////// Command 0x09 -- SEND LAST RECORD
-    // sends the most recent record created (the current recCount)
+    // sends the most recent record created (the current rec_count)
 void send_last_record(void)
 {       while (COAX_TX_NOT_READY);       //wait for an empty buffer
 UCA0TXBUF= DATA_BYTES;      // we'll send 32 bytes
-send_a_record(recCount);    // send the data
+send_a_record(rec_count);    // send the data
 }
 
-//REWRITE
-////////////// Command 0x0A -- SEND ALL RECORDS
-    // sends all the records in memory
-void send_all_records(void)
-{unsigned int temp_count=0;         // counts how many records have been sent
-    while (COAX_TX_NOT_READY);      //wait for an empty buffer
-    UCA0TXBUF= recCount >>8;        // we'll send the high byte of the number of records
-    while (COAX_TX_NOT_READY);      //wait for an empty buffer
-    UCA0TXBUF= recCount & 0x00FF;   // we'll send the low byte of the number of records
-    while (COAX_TX_NOT_READY);      //wait for an empty buffer
-    UCA0TXBUF= DATA_BYTES;          // we'll send 32 bytes in each record
-    while (temp_count < recCount)   // until we've sent them all
-    {   send_a_record(temp_count);      // send another record
-        temp_count++;                   // increment the counter
-    }
-}
+
 
 // REWRITE (eventually)
 ////////////// Command 0x0B -- MANUAL OPERATION
@@ -2962,7 +3113,7 @@ void send_all_records(void)
     // the ADXL register, and then the number of bytes to read or write using SPI
 void manual_operation(void)
 { unsigned char command, address, byte_count, count;
-    reset_SPI();                    // confirm that SPI is enabled
+    reset_spi();                    // confirm that SPI is enabled
     command = receive_byte();       // read, write but don't stream
     address = receive_byte();       // the address we will read from or write to
     byte_count= receive_byte();
@@ -2981,7 +3132,7 @@ void manual_operation(void)
     // if things are in range we can continue
     if (command == ADXL_WRITE)      // If we're writing data we have to receive it first
     // read from the UART and write to the SPI
-    {   for (count = 0; count <byte_count; count++) buffer.bytes[count] = receive_byte();
+    {   for (count = 0; count <byte_count; count++) spi_buffer[count] = receive_byte();
         // we'll count off the bytes we were told to receive,  get a byte and store it in the buffer
         ADXL_SELECT;      // Select the chip by setting STE pin low (P2.3)
             // Write the instruction to the ADXL to turn on
@@ -2991,14 +3142,14 @@ void manual_operation(void)
         ADXL_TX_BUFF = address;        // send the start address of the register
         for (count = 0; count <byte_count; count++)
             {   while(ADXL_TX_NOT_READY);
-                ADXL_TX_BUFF = buffer.bytes[count];    // send the data received
+                ADXL_TX_BUFF = spi_buffer[count];    // send the data received
             }
         while(ADXL_BUSY);            // wait for it to finish transmitting
         ADXL_DESELECT;       // deselect
         return;
     }
     //otherwise we are reading from the SPI and writing to the UART
-    reset_SPI();                    // confirm that SPI is enabled
+    reset_spi();                    // confirm that SPI is enabled
     ADXL_SELECT;          // Select the chip by setting STE pin low (P2.3)
     __no_operation();               // let the ADXL settle
     while(ADXL_TX_NOT_READY);             // wait for the TX buffer to empty
@@ -3009,14 +3160,14 @@ void manual_operation(void)
     {       // Fill up the buffer with the data from the ADXL
         while(ADXL_TX_NOT_READY) ;        // wait for the TX buffer to empty
         ADXL_TX_BUFF= 0xFF;            // Send another dummy byte to push data off the stack
-        buffer.bytes[count] = UCA1RXBUF;    // get the byte from the previous send
+        spi_buffer[count] = UCA1RXBUF;    // get the byte from the previous send
     }
     while(ADXL_TX_NOT_READY) ;            // wait for SPI module to finish up
     address = UCA1RXBUF;            // get the last byte but ignore it
     ADXL_DESELECT;           // deselect
     for (count = 0; count <byte_count; count++)
     {   while(COAX_TX_NOT_READY);        // wait for an empty buffer
-        UCA0TXBUF = buffer.bytes[count];    // send the data in the buffer
+        UCA0TXBUF = spi_buffer[count];    // send the data in the buffer
     }
 }
 
@@ -3027,7 +3178,7 @@ void manual_operation(void)
     // This routine does not read the X,Y, Z and Temp registers.
     // The ADXL chip must be reset and turned on before using this routine.
 void stream_data(void)
-{   reset_SPI();                // confirm that SPI is enabled
+{   reset_spi();                // confirm that SPI is enabled
 //This routine needs to be rewritten
 }
 
@@ -3039,8 +3190,8 @@ void stream_data(void)
     // first byte sent is the number of bytes being sent,
     // then they are sent in order.  The number of bytes being sent will be zero
     // if the starting byte and/or number of bytes requested is out of range.
-void check_ID(void)
-{   transfer_string(nest_ID, NEST_ID_BYTES, SEND);
+void check_id(void)
+{   transfer_string(nest_id, NEST_ID_BYTES, SEND);
 }
 
 // REWRITE
@@ -3088,35 +3239,35 @@ void resume_run_bins(void)
 {   unsigned char out_of_time = 0;
     unsigned char bin;
     unsigned char z;
-    if ((recCount < maxRecords) && (!out_of_time))  // continue if there is room for more and still time
-    {                           // recCount goes from 0 to MAXRECORDS minus 1
+    if ((rec_count < max_records) && (!out_of_time))  // continue if there is room for more and still time
+    {                           // rec_count goes from 0 to MAXRECORDS minus 1
         interval(PARAM_SLEEP_INTERVALS);       // Enter low power mode 3 for a fraction of a second (the loop starts up again every 1/8 second -- restored by timer interupt)
-        ADXL_FifoRead();        // Read the data off the ADXL FIFO stack
-        process_bin_data();         // process the data and store in buffer.bins array
+        adxl_fifo_read();        // Read the data off the ADXL FIFO stack
+        process_bin_data();         // process the data and store in adxl_bins array
         if(!(interval_count & 0x07))    // increment counters every second
         {                               // This only happens every 8 intervals
-            recSecs++;                  // Increment the number of seconds in the current record
-            secCount++;                 // Increment the total number of seconds since last transmission
-            out_of_time = (secCount > max_run_time);// Flag if we are in overtime
-            if ((recSecs >= secMax) || out_of_time) // Check to see if it is time to start a new record or time has run out
+            rec_secs++;                  // Increment the number of seconds in the current record
+            sec_count++;                 // Increment the total number of seconds since last transmission
+            out_of_time = (sec_count > max_run_time);// Flag if we are in overtime
+            if ((rec_secs >= sec_max) || out_of_time) // Check to see if it is time to start a new record or time has run out
             {                           // Process and store the temporary bins in the record.
                 bin = JOLT_BITS - 1;    // Start with the bin with the highest readings
-                while( (bin>0) && (buffer.bins[bin] == 0) ) bin =  bin - 1 ; // Find the highest bin with a non zero count in it
-                data.bins[recCount][HIGHEST_BIN]= bin + 1;   // Save it in the highest_bin array (1-25)
+                while( (bin>0) && (adxl_bins[bin] == 0) ) bin =  bin - 1 ; // Find the highest bin with a non zero count in it
+                data.bins[rec_count][HIGHEST_BIN]= bin + 1;   // Save it in the highest_bin array (1-25)
                 if (bin < MAX_BIN-1) bin = MAX_BIN-1;   // is room for all the bins with non-zero data if not, we'll drop the lowest ones
                 z = DATA_SIZE;                          // Counter for the real data storage bins in the record
                 while (z > BINS)
                 {                       // transfer the temporary data into the record
                     z =  z - 1;         // the range of the array is MAX_BIN - 1 to zero.
-                    data.bins[recCount][z] = buffer.bins[bin];  // move the temp bin to the array.
+                    data.bins[rec_count][z] = adxl_bins[bin];  // move the temp bin to the array.
                     bin = bin - 1 ;     // fill all of them.
                 }
-                clear_temp_bins();      // reset the buffer.bins for the next record
+                clear_temp_bins();      // reset the adxl_bins for the next record
                 not_first_read = NO;    // reset for the first read
-                data.bins[recCount][TEMPS] = read_temperature(3); // store the average of 2^3 temperature readings
+                data.bins[rec_count][TEMPS] = read_temperature(3); // store the average of 2^3 temperature readings
                             // prepare for a new record
-            recSecs = 0 ;   // reset the second counter
-            recCount++ ;    // and add a new record
+            rec_secs = 0 ;   // reset the second counter
+            rec_count++ ;    // and add a new record
 
             }
         }
@@ -3131,13 +3282,13 @@ void resume_run_bins(void)
     // not much error checking
 void start_bin_run(void)
 {   clear_all_records();    // Reset the memory
-    if (ADXL_reset()) return; // Reset and initialize the ADXL
-    ADXL_on();              // Turn the sensor on
+    if (adxl_reset()) return; // Reset and initialize the ADXL
+    adxl_on();              // Turn the sensor on
     wait_a_sec(1);          // Wait a second
     clear_temp_bins();      // Reset the temporary bins
-    ADXL_FifoRead();        // Read the FIFO stack to empty it of initial bad reads (we lose a second of data)
-    recCount = 0;           // Reset counts
-    secCount = 1;           // Reset the number of seconds we have been running
+    adxl_fifo_read();        // Read the FIFO stack to empty it of initial bad reads (we lose a second of data)
+    rec_count = 0;           // Reset counts
+    sec_count = 1;           // Reset the number of seconds we have been running
     data.bins[0][READINGS] = 0;  // Reset the number of readings to zero
 //    resume_run_bins();    // should be called every interval to collect data in bins
 }
@@ -3159,12 +3310,6 @@ void synch_event_clock(void)
 
 
 // send data out in small chunks that take more time than available during an interval
-unsigned char report_data(void)
-{
-return(NO);
-}
-
-
 void stop_data_run(void)    // stops collecting data
 {
 return;
@@ -3183,12 +3328,12 @@ void generate_random(unsigned char bits)
 {   unsigned int mask = 0;
     unsigned char x;
     clear_all_records();        // Reset the memory
-    if (ADXL_reset()) return;   // Reset and initialize the ADXL
-    ADXL_on();                  // Turn the sensor on
+    if (adxl_reset()) return;   // Reset and initialize the ADXL
+    adxl_on();                  // Turn the sensor on
     wait(bits<<4);              // Wait 16 msec per bit
-    ADXL_FifoRead();            // Read the data off the ADXL FIFO stack
+    adxl_fifo_read();            // Read the data off the ADXL FIFO stack
     for( x=bits + bits + 10; x>9; x-=2 )                           // double bits to decide how many readings
-    {   random = (random<<1) | (incoming.spi[x] & 0x01) ;   //Just use the low bits from the 10 readings
+    {   random = (random<<1) | (spi_buffer[x] & 0x01) ;   //Just use the low bits from the 10 readings
         mask = (mask<<1) | 1;   // create a mask to get rid of
     }
     random &= mask;             //Just the number of bits needed
@@ -3211,11 +3356,7 @@ void wait_random(void)
     return;
 }
 
-// sleep until interval count gets to the last interval
-void wait_for_last_cycle(void)
-{   while (interval_count < interval_limit -1)
-        ENTER_LOW_POWER_MODE_3;
-}
+
 
 //////////////////////////////////////////////////////////////
 //////////////////// Command: synch_slave ////////////////////
@@ -3288,7 +3429,11 @@ unsigned char rx_tx_checked(unsigned char rx_msg, unsigned char tx_msg)
 void clear_slots(void)
 { unsigned char slot_count = 0;
     for ( ; slot_count < SENSOR_SLOTS; slot_count++)
+    {
         sensor_slot[slot_count] = 0;
+        sensor_status[slot_count] = 0;
+
+    }
     device_count = 0;
 }
 
@@ -3304,7 +3449,7 @@ unsigned char get_registered(void)
     wait_random();         // wait our random amount of time
     COAX_RX_START_DISABLE; // either the random timer has finished or we've starte to receive
     if (registering)       // indicates that we were the first to try an register
-    {   if ( (tx_rx_checked(REQUEST_TIME_SLOT, REQUEST_ID))
+    {   if ( (tx_rx_checked(REQUEST_TIME_SLOT, SEND_ID))
             && (coax_long_message(IDENTIFICATION, 0, 0, serial_num, SERIAL_ID_LEN))
             && (rx_checked(REGISTRATION)) )
         {   this_unit = parameter_one;
@@ -3322,7 +3467,7 @@ unsigned char get_registered(void)
 unsigned char register_device(void)
 {  unsigned char slot_count;    // a counter to find an unused slot
     if (tx_rx_checked(EMPTY_TIME_SLOT, REQUEST_TIME_SLOT))  // let the devices know a slot is available
-    {   if (tx_rx_checked(REQUEST_ID, IDENTIFICATION))      // if a device wants the slot, ask sensor to send the sensor_ID
+    {   if (tx_rx_checked(SEND_ID, IDENTIFICATION))      // if a device wants the slot, ask sensor to send the sensor_ID
         {                          //make sure the data isn't too big for the array
             if (received_datalength > NEST_ID_BYTES) received_datalength = NEST_ID_BYTES;
                                    // find the first empty slot
@@ -3330,7 +3475,7 @@ unsigned char register_device(void)
             if (slot_count >= SENSOR_SLOTS) slot_count = 0;   // if there are no available slots, return a zero
             // TODO // it would be possible here to check and see if this sensor were recently connected
             else                       // save the serial number (last sensor rejected gets stored in slot zero)
-            {   move_string(incoming.uart, 0, received_datalength, sensor_ids[slot_count], 0);
+            {   move_string(coax_buffer, 0, received_datalength, sensor_ids[slot_count], 0);
                 if  (coax_long_message(REGISTRATION, slot_count, 0, " ", 1 )) // if the sensor received the info
                 {   going_to_unit = slot_count;
                     if (rx_checked(REGISTERED))
@@ -3353,17 +3498,14 @@ unsigned char register_device(void)
 
 
 
-//    move_string(nest_ID,  SERIAL,SERIAL_BYTES, messages[30], 0);        // store the serial number
-//    move_string(nest_ID,  DAY, DAY_BYTES, messages[32], 8);             // store the date installed
-//    move_string(nest_ID,  MONTH, MONTH_BYTES, messages[32], 5);
-//    move_string(nest_ID,  YEAR, YEAR_BYTES, messages[32], 2);
-//    move_string(nest_ID,  LATITUDE, LATITUDE_BYTES, messages[39], 0);   // store the nest location (GPS not implemented)
-//    move_string(nest_ID,  LONGITUDE, LONGITUDE_BYTES, messages[40], 0);
+//    move_string(nest_id,  SERIAL,SERIAL_BYTES, messages[30], 0);        // store the serial number
+//    move_string(nest_id,  DAY, DAY_BYTES, messages[32], 8);             // store the date installed
+//    move_string(nest_id,  MONTH, MONTH_BYTES, messages[32], 5);
+//    move_string(nest_id,  YEAR, YEAR_BYTES, messages[32], 2);
+//    move_string(nest_id,  LATITUDE, LATITUDE_BYTES, messages[39], 0);   // store the nest location (GPS not implemented)
+//    move_string(nest_id,  LONGITUDE, LONGITUDE_BYTES, messages[40], 0);
 //    move_string("00", 0, 2, messages[DAYS_NUM], 4); // reset the report counter
-//    phone_in();                     // report that the new sensor was plugged in
-//    set_report_frequency();         // decide how often to report
-//    coax_short_message(START_RUN);     // send SS the command to collect data and process
-//}
+
 
 
 void slave_routines()
@@ -3372,29 +3514,21 @@ void slave_routines()
     {   error_code = NO;            // clear any errors from the last go round
         switch (received_command)                // process the command
 
-        {   case SYNCH:
-                slave_registered = NO;                    //  give up and re-register
-                this_unit = DEFAULT_SLAVE;
-                synch_slave();
-                status = READY;
+        {   case SIGN_OFF :
                 processing = NO;
                 break;
-            case SIGN_OFF:
-                processing = NO;
-//            case REGISTERED:                    // slave shouldn't get this command
-//                break;
             case TURN_ADXL_OFF :
-                ADXL_power_cycle();                 // Hardware power cycle -- puts ADXL in default low power standby
+                adxl_power_cycle();                 // Hardware power cycle -- puts ADXL in default low power standby
                 status = READY;
                 received_command = STATUS;
                 break;
             case TURN_ADXL_ON :
-                ADXL_on();                  // turns the sensor on
+                adxl_on();                  // turns the sensor on
                 status = READY;
                 received_command = STATUS;
                 break;
             case RESET_ADXL :
-                if(ADXL_reset()); // does a hardware and software reset of the ADXL and puts it in standby
+                if(adxl_reset()); // does a hardware and software reset of the ADXL and puts it in standby
                 {   status = READY;
                     received_command = STATUS;
                 }
@@ -3427,11 +3561,6 @@ void slave_routines()
                 status = READY;
                 received_command = STATUS;
                 break;
-            case REQUEST_DATA :
-                send_all_records();         // sends out all the collected data recods
-                status = READY;
-                received_command = STATUS;
-                break;
             case MANUAL_OPERATION:
                 status = BUSY;
                 manual_operation();         // sends and receives data directly to and from the ADXL sensor
@@ -3442,12 +3571,12 @@ void slave_routines()
                 stream_data();              // streams data from the sensor's FIFO stack
                 processing = NO;
                 break;
-            case REQUEST_ID :
-                check_ID();                 // sends the sensor ID to the comm board
+            case SEND_ID :
+                check_id();                 // sends the sensor ID to the comm board
                 status = READY;
                 received_command = STATUS;
                 break;
-            case REQUEST_PARAMETERS :
+            case SEND_PARAMETERS :
                 send_parameters();          // sends requested parameters to the comm board
                 status = READY;
                 received_command = STATUS;
@@ -3468,12 +3597,16 @@ void slave_routines()
                 break;
             case START_RUN :
                 status = BUSY;
-//                start_integration();
+                adxl_reading_on = YES;     // set the flag to read the ADXL data
+                integrating_on = YES;      // set the flag to integrate the ADXL data
+                bin_process_on = NO;       // make sure bin processing is off
                 received_command = STATUS;
                 break;
             case STOP_RUN :
                 status = READY;
-                stop_data_run();
+                adxl_reading_on = NO;     // set the flag to stop reading the ADXL data
+                integrating_on = NO;      // set the flag to stop integrating the ADXL data
+                bin_process_on = NO;       // make sure bin processing is off
                 received_command = STATUS;
                 break;
             default :
@@ -3490,17 +3623,19 @@ unsigned char master_routines()       // this is where the master decides what t
     while (processing)              // keep looping until the conversation is done
     {   switch (received_command)                // process the command
 
-        {   case READY:
-                    // nothing yet,  this will start a run
+        {   case READY:             // the slave is not doing anything
+            /// if there are new parameters they can be sent
+            /// if there is new program code it can be sent
+                tx_rx(START_RUN);    // otherwise  this will start a run
+                break;
+
+            case BUSY:              // the slave is busy processing data
+                processing = NO;    // the conversation is over
+                break;
+
+            case DATA_READY:        // the slave has data to send
+                data_ready = YES;   // set a flag to suspend and report all the data from the slaves
                 processing = NO;
-                break;
-            case REGISTERED:                    // this shouldn't happen here
-                break;
-
-            case SUSPEND :
-                break;
-
-            case BUSY:
                 break;
 
             case GOOD_TRANSMISSION:
@@ -3655,7 +3790,7 @@ void slave_settings(void)
 
 void initialize_slave(void)
 { unsigned char odr_count;
-    {   recCount = 0;               // first power up ever starts data recording over
+    {   rec_count = 0;               // first power up ever starts data recording over
             for (odr_count = 0; odr_count <6; odr_count++)
             {
                 integration_max[odr_count]= 0;          // the max starts out low
@@ -3664,7 +3799,6 @@ void initialize_slave(void)
         }
         not_first_start = YES;          // no longer the first power up.
         status = READY;                 // this might not get reset after a power failure
-        suspended = NO;                 // start out in not suspended mode -- master decides when t()o suspend
         reporting_data = NO;            // send data only when requested
         going_to_unit = DEFAULT_MASTER; // slaves only talk to masters
         e_sample_count = 0;             // start the sample count at zero
@@ -3685,7 +3819,7 @@ void common_startup(void)
     current_command_bank = CORE_COMMAND_BANK;                   //and one bank of commands
     interval_limit = INTERVALS;
     interval_count = 0;             // reset the interval clock
-    intervals_on = YES;         // The slave never is, the master starts off quiet.
+    intervals_on = YES;             // The slave never is, the master starts off quiet.
 }
 
 
@@ -3698,101 +3832,108 @@ void slave()
     common_startup();               // Configuration settings common to both MASTER and SLAVE
     STOP_INTERVAL_TIMER;            // stop the timer for now
     wait(512);                      // wait 1/2 a second
-    generate_random(11);            // creates a random number between 0 and 4095
-    if (!not_first_start) initialize_slave();
+    generate_random(12);            // creates a random number between 0 and 8191
+//    if (!not_first_start) initialize_slave();
+    initialize_slave();             // this may need to be condtional
     slave_registered = NO;          // flag that slave is not registered
+    suspended = NO;                 // start out in not suspended mode -- master decides when to suspend
     this_unit = DEFAULT_SLAVE;      // start out unregistered
     set_new_parameters();           // computes the length of a record
     synch_slave();                  // first get in synch ith what is happening
-    ADXL_FifoRead();                // empty the ADXL buffer before we begin
+    adxl_fifo_read();               // empty the ADXL buffer before we begin
     while (TRUE)                    // just loop
     {   coax_reset();               // clear out any junk
+        intervals_on = YES;         // The slave always keeps time.
         ENTER_LOW_POWER_MODE_3;     // wait until the next interval begins
 // There are two modes, suspended mode (suspended = YES) and not suspended mode (suspended = NO)
 // Suspended mode is for when the cell phone board is on and reporting data
-        if (suspended)                   // hopefully we won't go out of synch in a few minutes
-        {   if ( (interval_count == 1)   // listen for messages during interval one, but don't disconnect if there aren't any
-                && (receive_message()) ) // any messages now are about sending data
-            {   if (received_command == REQUEST_DATA)
-                {   reporting_data = report_data();     // set up data reporting and sends a block of data
-                                                        // TRUE = Still reporting, FALSE  = Done or fatal error
+        if (suspended)                  // hopefully we won't go out of synch in a few minutes
+        {   if (interval_count == 1)  // listen for messages during interval one, but don't disconnect if there aren't any
+            {   if (receive_message())      // any messages now are about sending data
+                {   if (received_command == SEND_DATA)
+                    {   record_number = 0;   // start with the first record
+                        reporting_data = send_records();     // set up data reporting and sends a block of data
+
+                    }                                        // TRUE = Still reporting, FALSE  = Done
+                    else if (received_command == WAKE_UP)    // WAKE_UP is the command to end suspended mode
+                    {    suspended = NO;
+                    }
                 }
-                else if (received_command == WAKE_UP)   // WAKE_UP is the command to end suspended mode
-                    suspended = NO;
             }
-            else if (reporting_data)  // the data gets sent in 1K chunks during each interval
-                reporting_data = report_data();
+            else if (reporting_data)                    // the data gets sent in chunks during each interval
+                reporting_data = send_records();         // The flag is reset when the last record is set.
         }
 // If not suspended mode, the units handshake their status during their assigned slot
 // interval zero is always just for resynching
         else switch (interval_count)
         {   case 0:
-            if ( (receive_message())
-                && (received_command == SYNCH)                 // if no error receiving
-                && (received_command_bank == CORE_COMMAND_BANK) )
-                // and the command is to synch all devices,
-            {   synch_event_clock();                // if so, synchronize our watches
-            }
-            else
-            {   slave_registered = NO;              // otherwise give up and re-register
-                this_unit = DEFAULT_SLAVE;          // release the slot
-                synch_slave();                      // and get in synch with what is happening
-            }
-            break;
+                if ( receive_message()
+                    && (received_command == SYNCH)                 // if no error receiving
+                    && (received_command_bank == CORE_COMMAND_BANK) )
+                    // and the command is to synch all devices,
+                {   synch_event_clock();                // if so, synchronize our watches
+                }
+                else
+                {   slave_registered = NO;              // otherwise give up and re-register
+                    this_unit = DEFAULT_SLAVE;          // release the slot
+                    synch_slave();                      // and get in synch with what is happening
+                }
+                break;
 // interval one is for adjusting the clock, registering the sensor and housekeeping
 // Also controls when to report data and suspend handshaking
             case 1:           // adjust the interval timer back to a full 125 msec
-            STOP_INTERVAL_TIMER;    // stop the timer while adjusting
-            ZERO_TIMER;             // Start the timer counter at zero again
-            NORMAL_INTERVAL;        // reset to normal interval length after a synch interval
-            START_INTERVAL_TIMER;   // start or restart the timer counter
-            watchdog_reset();       // this slot can be used for other housekeeping
-            interval_count = 1;     // was there an interrupt generated by resetting the clock?
-            // This is also be the interval for registerring
-            if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
-            {   if ( (receive_message())          // and there's no error receiving the message
-                    && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
-                {   if (get_registered())           // register the sensor and assign it an interval
-                    {   status = READY;             // if the interval is non-zero we are connected and ready
-                        slave_registered = YES;
+                STOP_INTERVAL_TIMER;    // stop the timer while adjusting
+                ZERO_TIMER;             // Start the timer counter at zero again
+                NORMAL_INTERVAL;        // reset to normal interval length after a synch interval
+                START_INTERVAL_TIMER;   // start or restart the timer counter
+                watchdog_reset();       // this slot can be used for other housekeeping
+                interval_count = 1;     // was there an interrupt generated by resetting the clock?
+                // This is also be the interval for registerring
+                if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
+                {   if ( (receive_message())          // and there's no error receiving the message
+                        && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
+                    {   if (get_registered())           // register the sensor and assign it an interval
+                        {   status = READY;             // if the interval is non-zero we are connected and ready
+                            slave_registered = YES;
+                        }
                     }
                 }
-            }
-            // and for going in and out of suspend mode during data reporting
-            else if ( (receive_message())       // only if registered.
-                && (received_command == SUSPEND) )
-                {   suspended = YES;            // go into suspend mode if commanded
-                    wait_for_last_cycle();      // wait until the last interval
-                }
-            break;
+                // and for going in and out of suspend mode during data reporting
+                else if ( (receive_message())       // only if registered.
+                    && (received_command == SUSPEND) )
+                    {   suspended = YES;            // go into suspend mode if commanded
+                        wait_for_last_cycle();      // wait until the last interval
+                    }
+                break;
 
             default:
-            // This only happens during the registered interval if not suspended
-            if (interval_count == this_unit)
-            {
-                if ( (receive_message())                      // receive a message and there was no error
-                    && (received_command == STATUS) )  // and the reply is what was expected
-                         temp = coax_short_message(READY);
-                else
+                // This only happens during the registered interval if not suspended
+                if (interval_count == this_unit)
                 {
-                    slave_registered = NO;      // otherwise give up and re-register
-                    this_unit = DEFAULT_SLAVE;  // un registered units are all 0xFF
-                    synch_slave();              // and get in synch with what is happening
+                    if (receive_message())                      // receive a message and there was no error
+                        slave_routines();
+                    else
+                    {
+                        slave_registered = NO;      // otherwise give up and re-register
+                        this_unit = DEFAULT_SLAVE;  // un registered units are all 0xFF
+                        synch_slave();              // and get in synch with what is happening
+                    }
                 }
-            }
-            break;
+                break;
         }
         // This is where everything should happen after synchs and handshakes, like data readings
         // Data is continuously read, even when old data is being sent over the COAX line
-        if ( !(interval_count && 0x07) )    // every second
+        if ( !(interval_count & 0x07) )    // every second
         {
-            secCount++;             // seconds since last data upload
-            recSecs++;              // seconds this record has been counting
+            sec_count++;             // seconds since last data upload
+            rec_secs++;              // seconds this record has been counting
         }
-
-        ADXL_FifoRead();    //This reads the buffer of the ADXL fifo buffer
-//        collect_data();     //This processes the data from the buffer depending upon the algorithm picked //TODO//
-        integrate_data();   // for now just use the integration algorithm
+        if (adxl_reading_on)
+            adxl_fifo_read();    //This reads the buffer of the ADXL fifo buffer
+        if (integrating_on)
+            integrate_data();   // for now just use the integration algorithm
+        if (bin_process_on)
+            process_bin_data();
     }
 }
 
@@ -3811,7 +3952,7 @@ void master()
     PHONE_POWER_DISABLE;            // Make sure the phone is off, while we are not using the phone:
     PHONE_ON_OFF_REQUEST;           // Set the phone's on/off pin to low (Turns off LED in prototype)
     PHONE_RESET_REQUEST;            // Set the phone reset pin to low
-    phone_UART_off();               // start with the phone UART deactivated.
+    phone_uart_off();               // start with the phone UART deactivated.
 
     // Check for sufficient battery power to start up
     // SHUT_OFF_LEVEL should be sufficient to power up the uP, but not enough for a 2maH phone call.
@@ -3836,18 +3977,19 @@ void master()
     data_ready = new_census = NO;
     time_to_wakeup = NO;
     device_count = new_device_count = 0;
-    if (recCount) send_old_data();  // send old data if there is any after WD reset
+//     if (rec_count) send_old_data();  // send old data if there is any after WD reset
+//TODO// take a census after reset and continue with any sensors that respond.
     while(TRUE)                     // loop forever
     {   ENTER_LOW_POWER_MODE_3;     // wait until the next 1/8 sec clock interval
         coax_reset();               // get rid of any UART garbage
-        if (interval_count == 0)                         // interval zero is always just for resynching
-        {       going_to_unit = ALL_UNITS;          // everyone synchs their clock
-                if (coax_short_message(SYNCH) )   //send the message
-                    blink(1);              // blink every 6 seconds
+        if (interval_count == 0)                // interval zero is always just for resynching
+        {       going_to_unit = ALL_UNITS;      // everyone synchs their clock
+                if (coax_short_message(SYNCH) ) //send the message
+                    blink(1);                   // blink every 6 seconds
                 GREEN_LED_OFF;
                       //TODO// does there need to be any error checking for tx?
-                      //TODO// This interval can also be used for commands going to all sensors
-                            // because they are all already listening and synched.
+                // Interval one is used for commands going to all sensors
+                // because they are all already listening and synched.
         }
         else if (interval_count == 1)   // this is the time slot for finding newly connected sensors (one per cycle)
         {   going_to_unit = ALL_UNITS;
@@ -3865,13 +4007,14 @@ void master()
             else if (data_ready)       //
             {
                 coax_short_message(SUSPEND);
+                intervals_on = NO;              // no timing interupts for now
                 phone_on();
-                // wake up the units with data one by one
-                // upload the data
-                //TODO// the rest of sending a phone call
-                phone_in();         // send in a report for each sensor
+                phone_in(); // send in a report for each slave
+                            // wakes up the slaves with data one by one
+                            // uploads the data to the cloud
                 time_to_wakeup = YES;
                 intervals_on = YES;
+                data_ready = NO;
                 wait_for_last_cycle();
             }
             else if (time_to_wakeup)
