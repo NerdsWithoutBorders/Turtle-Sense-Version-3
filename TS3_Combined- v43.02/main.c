@@ -63,7 +63,6 @@
 #define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
 #define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
 
-
 #define USER_PASSWORD "ABCDEFGH"  // 8 character password needed for program or parameter downloads.  Recompile with a different password.
 
 
@@ -290,14 +289,14 @@
         // Timer settings (MASTER and SLAVE)
 #define START_MSEC_TIMER            TA2CTL |= 0x0010    // turn on bit 4  to start the timer in up mode
 #define STOP_MSEC_TIMER             TA2CTL &= 0xFFCF    // turn off bits 4 and 5 to stop the timer
-#define START_RANDOM_TIMER          TA0CTL |= 0x0010    // turn on bit 4  to start the timer in up mode
-#define STOP_RANDOM_TIMER           TA0CTL &= 0xFFCF    // turn off bits 4 and 5 to stop the timer
+#define START_SHORT_TIMER           TA0CTL |= 0x0010    // turn on bit 4  to start the timer in up mode
+#define STOP_SHORT_TIMER            TA0CTL &= 0xFFCF    // turn off bits 4 and 5 to stop the timer
 
-#define RX_TIMEOUT                  10      // 10 milliseconds
+#define RX_TIMEOUT                  15     // 10 milliseconds
 #define SYNCH_TIMEOUT               96      // 96 milliseconds - if it misses the first message, it should catch the second.
 
 #define NORMAL_INTERVAL             TB0CCR0 = 0x03FF  // divide by 8 for 1028ths of a sec (in this case it equals 1/8 sec)
-#define SHORT_INTERVAL              TB0CCR0 = 0x03DF   // this is roughly 4 msec less than 1/8 sec
+#define SHORT_INTERVAL              TB0CCR0 = 0x03D7   // this is roughly 5 msec less than 1/8 sec
 #define START_INTERVAL_TIMER        TIMER_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE)
 #define STOP_INTERVAL_TIMER         TIMER_B_stop(TIMER_B0_BASE)
 #define ZERO_TIMER                  TB0R = 0
@@ -657,7 +656,7 @@
 
 #define FRACTIONAL_BITS      4  // The number of bits for each ODR that is the fractional part of the number.
                                 // For example if the reported amount is 0xA34E, set at 4 the fractional portion is "E" = 0x000E/0x0010
-#define SAMPLE_BITS         12  // The power of two for the number of samples to integrate
+#define SAMPLES_POWER_OF_2         12  // The power of two for the number of samples to integrate
                                 // also used to bitshift the result to divide for an average reading
 
 
@@ -729,8 +728,8 @@
 
     ////// SENDING MESSAGES
     volatile unsigned int message_count;                // a counter used while sending messages
-    volatile unsigned char going_to_bank;               // the bank of devices that the message is being sent to
-    volatile unsigned char going_to_unit;               // the device number in the bank that we are sending a message to
+    volatile unsigned char bank_talking_to;             // the bank of devices that the message is being sent to
+    volatile unsigned char unit_talking_to;             // the device number in the bank that we are sending a message to
     volatile unsigned char this_bank;                   // the bank of devices of the unit sending the message
     volatile unsigned char this_unit;                   // the unit number of the device sending the message
     volatile unsigned char current_command_bank;        // the bank of commands being used by the device
@@ -760,8 +759,6 @@
     ////// Data  recording and reporting
     volatile unsigned int  last_temperature;        // the last temperature reading
     volatile unsigned int  day_of_year;             // the number of days elapsed so far this year
-    volatile unsigned int  last_report_day;         // the day of the year the last report was sent
-    volatile unsigned int  report_number;           // the number of the report for today (starts at 1)
     volatile unsigned int battery_level;            // 0 = battery dead, 100 = fully charged
     const char battery_percents[]= { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
                                     10,12,15,20,25,30,40,50,60,70,
@@ -793,6 +790,9 @@
      unsigned char sensor_slot[SENSOR_SLOTS];       // 0 = empty, 1 = taken, 2 = suspended
      unsigned char sensor_ids[SENSOR_SLOTS][9];     // sensor serial numbers in each slot (or most recent ID)
      unsigned char sensor_status[SENSOR_SLOTS];     // 0 = no unreported change, 1 = recently connected, 2 = recently disconnected
+     volatile unsigned int  report_number[SENSOR_SLOTS];    // the number of the report for today (starts at 1)
+     volatile unsigned int  last_report_day[SENSOR_SLOTS];  // the day of the year the last report was sent
+
 
 //// Sensor Status Values ////
 #define NO_UNREPORTED_CHANGE 0
@@ -871,7 +871,7 @@ unsigned char parameters[40] = {
         SLOW_DAYS,                      // parameters[28] - Number of days of low activity
         SLOWREC_LO, SLOWREC_HI,         // parameters[29] and [30] - The number of seconds to accumulate readings in each record (set of bins)
         LOAD_PARAMETERS_TRIES,          // parameters[31] - the number of times we try to load new parameters (must be 1 or more)
-        SAMPLE_BITS,                    // parameters[32] - the power of two for integration samples to accumulate (also used to bit shift for an average)
+        SAMPLES_POWER_OF_2,                    // parameters[32] - the power of two for integration samples to accumulate (also used to bit shift for an average)
         FRACTIONAL_BITS,                // parameters[33] - the number of bits of the reported values that is fractional (defalut is 4)
         ODR_RATES,                      // parameters[34] - which ODR rates are being calculated bit0 = base rate, bit1 is base/2, bit2 is base/4, etc.
         RECORD_BUNCH,                   // parameters[35] - the number of records transfered during each 1/8 second interval
@@ -894,7 +894,7 @@ unsigned char new_parameters[40]= {
         SLOW_DAYS,
         SLOWREC_LO, SLOWREC_HI,
         LOAD_PARAMETERS_TRIES,
-        SAMPLE_BITS,
+        SAMPLES_POWER_OF_2,
         FRACTIONAL_BITS,
         ODR_RATES,
         RECORD_BUNCH,
@@ -932,7 +932,7 @@ unsigned char new_parameters[40]= {
 #define PARAM_SLOWREC_LO        parameters[29]
 #define PARAM_SLOWREC_HI        parameters[30]
 #define PARAM_LOAD_TRIES        parameters[31]
-#define PARAM_SAMPLE_BITS       parameters[32]
+#define PARAM_SAMPLES           parameters[32]
 #define PARAM_FRACTIONAL_BITS   parameters[33]
 #define PARAM_ODR_RATES         parameters[34]
 #define PARAM_RECORD_BUNCH      parameters[35]
@@ -969,7 +969,7 @@ unsigned char new_parameters[40]= {
 #define NEW_SLOWREC_LO        new_parameters[29]
 #define NEW_SLOWREC_HI        new_parameters[30]
 #define NEW_LOAD_TRIES        new_parameters[31]
-#define NEW_SAMPLE_BITS       new_parameters[32]
+#define NEW_SAMPLES           new_parameters[32]
 #define NEW_FRACTIONAL_BITS   new_parameters[33]
 #define NEW_ODR_RATES         new_parameters[34]
 #define NEW_RECORD_BUNCH      new_parameters[35]
@@ -1276,9 +1276,12 @@ unsigned char new_parameters[40]= {
             };
 
 
-    static const char days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    static const int days_total[] ={0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334} ;
-                                // used to calculate elapsed days
+//    static const char days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    static const int days_total[] ={0, 0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335} ;
+                                // used to calculate elapsed days -- works for leap years also
+    volatile unsigned int current_day;
+    volatile unsigned int current_month;
+
     static const unsigned int powers_of_10[] = { 1, 10, 100, 1000, 10000};
                                 // used for coverting HEX to ASCII
 
@@ -1371,14 +1374,14 @@ unsigned char new_parameters[40]= {
     volatile unsigned char bits_2_shift;     // the number of bits to shift to divide the totals to get averages
         // this is frequently recalculated in case the parameters change
     volatile unsigned char fractional_bits;   // The number of bits that will be the fractional portion
-        // of the result.  For turtlee_sample_bitss half the result is for the fractional part ( default FRACTIONAL_BITS = 4)
+        // of the result.  For turtles e_sample_bits, the last hex char of the result is for the fractional part ( default FRACTIONAL_BITS = 4)
     volatile unsigned char e_sample_bits;     // The number of bits to shift to divide for the integration of ADXL's ODR
         // assuming the ODR is 400  Minimum is 5, maximum is 15, but numbers that high are probably not practical
         // The result will be a char for the integer portion of the average, and a char for the fractional portion (default is 1/16)
-        // The maximum average (at the default SAMPLE_BITS value of 12) is 4096, which for turtles is just fine.
+        // The maximum average (at the default SAMPLES_POWER_OF_2 value of 12) is 4096, which for turtles is just fine.
         // This might need adjustments for other applications
         // in which case you'd change FRACTIONAL_BITS from its default value of 4.
-        // the SAMPLE_BITS minus FRACTIONAL_BITS cannot be negative for any ODR.
+        // the SAMPLES_POWER_OF_2 minus FRACTIONAL_BITS cannot be negative for any ODR.
         // Subtract the following from the e_sample_bits column for other ODRs:
         // -5 for 12.5 Hz, -4 for 25, -3 for 50,  -2 for 100,  -1 for 200
         //                -- Number of samples at each ODR --
@@ -1504,6 +1507,25 @@ void cs_setup(void)
 void watchdog_reset()       //reset the watchdog timer
 {
 
+}
+
+
+
+// Using the SMCLK, waits a specified number of cycles.
+// While registerring, used with "random" to wait a random time
+void short_wait(unsigned int wait_cycles)
+{ unsigned char old_intervals_on;
+    STOP_SHORT_TIMER;                 // Sets the value of the capture-compare register
+    TIMER_A_setCompareValue(TIMER_A0_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0, wait_cycles);
+                                     // Starts timer counter
+    TA0R = 0;
+    old_intervals_on = intervals_on; // save this
+    intervals_on = NO;               // stop the 1/8 sec clock wake-ups
+    START_SHORT_TIMER;               // start the timer
+    ENTER_LOW_POWER_MODE_3;          // sleep until the timer has counted up to the value just loaded
+    STOP_SHORT_TIMER;                // Sets the value of the capture-compare register
+    intervals_on = old_intervals_on; // intervals_on restored to previous setting
+    return;
 }
 
 
@@ -1705,8 +1727,8 @@ char coax_short_message(unsigned char command_number)
 {   unsigned int temp_checksum = 0x00;     // used to calculate the checksum of the message
     unsigned char *q = (unsigned char*)&temp_checksum;
     unsigned char short_command[] = {PROTOCOL_BYTE,      // Starts off with an 0xFF, but this could change for other protocols
-                                    going_to_bank,
-                                    going_to_unit,   // two bytes to identify who we are sending a message to -- Bank and number
+                                    bank_talking_to,
+                                    unit_talking_to,   // two bytes to identify who we are sending a message to -- Bank and number
                                     this_bank,
                                     this_unit,      // the ID of this device -- who is sending the message
                                     current_command_bank,
@@ -1741,8 +1763,8 @@ char coax_long_message( unsigned char command_number,
     unsigned char *p = (unsigned char*)&data_length;
     unsigned char *temp_pointer;
     unsigned char long_command[] = {PROTOCOL_BYTE,      // Starts off with an 0xFF, but this could change for other protocols
-                                    going_to_bank,
-                                    going_to_unit,    // two bytes to identify who we are sending a message to -- Bank and number
+                                    bank_talking_to,
+                                    unit_talking_to,    // two bytes to identify who we are sending a message to -- Bank and number
                                     this_bank,
                                     this_unit,           // the ID of this device -- who is sending the message
                                     current_command_bank,
@@ -1762,7 +1784,8 @@ char coax_long_message( unsigned char command_number,
         // calculate the checksum by adding all the bytes before the checksum
     temp_pointer = data_pointer;
     for (message_count = 0; message_count < data_length; message_count++)    // also add all data
-    {   temp_checksum += *temp_pointer;                     // use the pointer to find the data
+    {
+        temp_checksum += *temp_pointer;                     // use the pointer to find the data
         temp_pointer++;                                     // increment the point to the next byte
     }
     for (message_count = 15; message_count > 11; message_count--)        // go through the 6 bytes of the checksum
@@ -2017,10 +2040,10 @@ unsigned int ascii2int(unsigned char *char_string, unsigned char offset, unsigne
     // TODO // Save day and report count on sensor so that the numbers continue if the comm tower is swapped
 void set_time(void)
 {// unsigned int start_day;
-    unsigned int current_day;
+ // unsigned int current_day;
  // unsigned int start_month;
-    unsigned int current_month;
-    move_string(messages[LAST_REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
+ // unsigned int current_month;
+ // move_string(messages[LAST_REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
     reset_phone_uart();                                         // empty the buffers
     send_message(AT_GET_TIME);                                   // request network time
     move_string(phone_buffer, 8, 17, messages[REPORT_TIME], 2);// move the date and time
@@ -2045,13 +2068,20 @@ void set_time(void)
     }
     int2ascii(day_count, messages[DAYS_NUM], 0, 3);           //put the count into the string
     */
+}
+
     // Phase III calculation
-    day_of_year = current_day + days_total[current_month];                        // start out with the number of days so far this month
-    if (day_of_year == last_report_day)
-        report_number++ ;
-    else
-        report_number = 1;
-    int2ascii(report_number, messages[TODAYS_NUM], 0, 2);
+void set_report_number(unsigned char slot)
+{
+    day_of_year = current_day + days_total[current_month];  // start out with the number of days so far this month
+    if (day_of_year == last_report_day[slot])               // If it is not a new day,
+        report_number[slot]++ ;                             // increase the number of the report.
+    else                                                    // But if it IS a new day,
+    {
+        report_number[slot] = 1;                            // start over with report #1
+        last_report_day[slot] = day_of_year;                // save the day for the next report
+    }
+    int2ascii(report_number[slot], messages[TODAYS_NUM], 0, 2);  // put the number in the messages for the file name and heading
 }
 
 
@@ -2192,7 +2222,7 @@ void send_report(void)
 //    if (wd_reset) send_message(TXT_RESET);                      // send reset message
 //    if (starting_up) send_message(TXT_MONITORING);              // send startup message
 //    if (!sensor_plugged_in) send_message(TXT_DISCONNECTED);     // send sensor disconnect message
-//    if (PARAM_REPORT_HEADINGS) do_script(end_report);           // closing messages
+    if (PARAM_REPORT_HEADINGS) do_script(end_report);           // closing messages
                                                 // finish up
     new_parameters_loaded = NO;                 // clear the new parameters flag
     wd_reset = NO;                              // clear the reset flag
@@ -2364,12 +2394,13 @@ unsigned char send_records(void)
     for (data_count = 0; ((data_count < PARAM_RECORD_BUNCH) && (record_number < rec_count)); data_count++)
             // send a bunch at a time until we've finished a bunch or sent the last record completed
     {
+        short_wait(100);    // wait at least 1/10 msec. to give receiving a chance to catch up
         move_string(data.energy[record_number],0, RECORD_BYTES, coax_buffer, 0 );
             // this step is only needed to keep the timing of sending a receiving in synch
             // the data could have been sent directly without moving it to the buffer first
             // but the sending side would get ahead of the recieving side.
             // The sender always needs to be slower than the receiver.
-        error_code = coax_long_message(DATA, record_number, (record_number < rec_count), coax_buffer, RECORD_BYTES) ;
+        error_code = coax_long_message(DATA, record_number, (record_number < rec_count-1), coax_buffer, RECORD_BYTES) ;
         // (DATA = command that we are sending data,
         //  record_number = the record number being sent,
         //  (record_number < rec_count-1) is whether there are more records to send (YES or NO).
@@ -2378,7 +2409,7 @@ unsigned char send_records(void)
         //  RECORD_BYTES = data length)
         record_number++;
     }
-    if (record_number < rec_count- 1)  // returns YES if there are more records to send, NO if we are done.
+    if (record_number < rec_count)  // returns YES if there are more records to send, NO if we are done.
     {
         return(YES);
     }
@@ -2393,9 +2424,6 @@ unsigned char send_records(void)
 
 
 
-
-
-
 // PHONE IN DATA
 // Turn on the phone and create a report
 void phone_in(void)
@@ -2405,16 +2433,17 @@ void phone_in(void)
   unsigned char more_records;
   unsigned char data_count;
     make_connection();               // wait for the phone to establish an internet connection
-    set_time();                         // reads RTC from the phone and saves it in messages
-    move_string(messages[REPORT_TIME], 0, 19, messages[LAST_REPORT_TIME], 0);  // move old report time to start time
+    move_string(messages[REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
+    set_time();                      // reads RTC from the phone and saves it in messages
     wait_a_sec(1);
     for (device_reporting = 2; device_reporting < interval_limit; device_reporting++)
     {   // might as well report all the devices when the first is ready.
         // they will all synch up together and report as frequently as the most frequent device.
         if (sensor_slot[device_reporting])      // only report if something is connected!
         {
-            going_to_unit = device_reporting;   // set up communication with the correct device
+            unit_talking_to = device_reporting; // set up communication with the correct device
             set_time();                         // reads RTC from the phone and saves it in messages
+            set_report_number(device_reporting);                // numbers the reports for each day
         //    increment the report count, start over if it is a new day
         //    if (day_count!= last_day_count) move_string("00", 0, 2, messages[DAYS_NUM], 4);   // move the two zeros to the string
         //    int2ascii(ascii2int(messages[DAYS_NUM], 4, 2) + 1, messages[DAYS_NUM], 4, 2);   // increment report count
@@ -2425,16 +2454,23 @@ void phone_in(void)
             more_records = YES;                 // start out expecting something
             recs_reported = 0;                  // no records received yet
             wait_for_cycle(1);                  // get in synch with the device after turning on the phone or sending a report
-            coax_short_message(SEND_DATA);      // tell the device to send data
             while (more_records)                // if there are more records coming
-            {   for (data_count = 0; ((data_count < PARAM_RECORD_BUNCH) && (more_records)); data_count++) // get a bunch of them
+            {
+                coax_short_message(SEND_DATA);      // tell the device to send data
+                for (data_count = 0; ((data_count < PARAM_RECORD_BUNCH) && (more_records)); data_count++) // get a bunch of them
                 {
                     receive_message();          // they come one per message
                     rec_count = parameter_one;  // parameter one will tell us the record number
-                    more_records=parameter_two; // parameter two will tell us to expect more or not
-                    move_string(coax_buffer, 0, RECORD_BYTES, data.energy[rec_count], 0 );
+                    if (rec_count <= MAX_RECORDS) // Don't mess the array up with bad data!
+                    {   more_records=parameter_two; // parameter two will tell us to expect more or not
+                        move_string(coax_buffer, 0, RECORD_BYTES, data.energy[rec_count], 0 );
                                                 // move the data from the buffer to the array
-                    recs_reported++ ;           // count how many there are to send
+                        recs_reported++ ;           // count how many there are to send
+                    }
+                    else
+                    {
+                        more_records = NO;      // abort on errors
+                    }
                 }
                 ENTER_LOW_POWER_MODE_3;         // wait until the next interval after each bunch
             }                                   // continue unitl there are no more to receive
@@ -3050,7 +3086,7 @@ void set_new_parameters(void)
     unsigned char bit_test;
     unsigned char odrs;
         // create integers out of parameter bytes (they might have changed)
-    e_sample_bits = PARAM_SAMPLE_BITS;          // update the sampling parameter
+    e_sample_bits = PARAM_SAMPLES;              // update the sampling parameter
     fractional_bits = PARAM_FRACTIONAL_BITS;    // this is the portion of the reported values that is fractional
     if (fractional_bits > 0x0F)
         fractional_bits = 0x0F;                 // check for errors, can't be more than 15
@@ -3299,6 +3335,24 @@ void start_bin_run(void)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+//generates a random int between 0 and the number of bits specified (10 bits = 1023)
+void generate_random(unsigned char bits)
+{   unsigned int mask = 0;
+    unsigned char x;
+    clear_all_records();        // Reset the memory
+    if (adxl_reset()) return;   // Reset and initialize the ADXL
+    adxl_on();                  // Turn the sensor on
+    wait(bits<<4);              // Wait 16 msec per bit
+    adxl_fifo_read();            // Read the data off the ADXL FIFO stack
+    for( x=bits + bits + 10; x>9; x-=2 )                           // double bits to decide how many readings
+    {   random = (random<<1) | (spi_buffer[x] & 0x01) ;   //Just use the low bits from the 10 readings
+        mask = (mask<<1) | 1;   // create a mask to get rid of
+    }
+    random &= mask;             //Just the number of bits needed
+    return;
+}
+
+
 void synch_event_clock(void)
 {
     STOP_INTERVAL_TIMER;             // Stop the 1/8 second interval timer for now.
@@ -3321,41 +3375,6 @@ void send_old_data(void)
 {
 return;
 }
-
-
-//generates a random int between 0 and the number of bits specified (10 bits = 1023)
-void generate_random(unsigned char bits)
-{   unsigned int mask = 0;
-    unsigned char x;
-    clear_all_records();        // Reset the memory
-    if (adxl_reset()) return;   // Reset and initialize the ADXL
-    adxl_on();                  // Turn the sensor on
-    wait(bits<<4);              // Wait 16 msec per bit
-    adxl_fifo_read();            // Read the data off the ADXL FIFO stack
-    for( x=bits + bits + 10; x>9; x-=2 )                           // double bits to decide how many readings
-    {   random = (random<<1) | (spi_buffer[x] & 0x01) ;   //Just use the low bits from the 10 readings
-        mask = (mask<<1) | 1;   // create a mask to get rid of
-    }
-    random &= mask;             //Just the number of bits needed
-    return;
-}
-
-// using the SMCLK, waits a random number of cycles
-void wait_random(void)
-{ unsigned char old_intervals_on;
-    STOP_RANDOM_TIMER;                 // Sets the value of the capture-compare register
-    TIMER_A_setCompareValue(TIMER_A0_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0, random);
-                                 // Starts timer counter
-    TA0R = 0;
-    old_intervals_on = intervals_on; // save this
-    intervals_on = NO;               // stop the 1/8 sec clock wake-ups
-    START_RANDOM_TIMER;              // start the timer
-    ENTER_LOW_POWER_MODE_3;          // sleep until the timer has counted up to the value just loaded
-    STOP_RANDOM_TIMER;               // Sets the value of the capture-compare register
-    intervals_on = old_intervals_on; // intervals_on restored to previous setting
-    return;
-}
-
 
 
 //////////////////////////////////////////////////////////////
@@ -3446,7 +3465,7 @@ unsigned char get_registered(void)
     registering = YES;     // set a flag that is reset if anyone else starts to transmit
     coax_reset();
     COAX_RX_START_ENABLE;  // receiving a start bit resets the registering flag cancelling registration
-    wait_random();         // wait our random amount of time
+    short_wait(random);         // wait our random amount of time
     COAX_RX_START_DISABLE; // either the random timer has finished or we've starte to receive
     if (registering)       // indicates that we were the first to try an register
     {   if ( (tx_rx_checked(REQUEST_TIME_SLOT, SEND_ID))
@@ -3477,7 +3496,7 @@ unsigned char register_device(void)
             else                       // save the serial number (last sensor rejected gets stored in slot zero)
             {   move_string(coax_buffer, 0, received_datalength, sensor_ids[slot_count], 0);
                 if  (coax_long_message(REGISTRATION, slot_count, 0, " ", 1 )) // if the sensor received the info
-                {   going_to_unit = slot_count;
+                {   unit_talking_to = slot_count;
                     if (rx_checked(REGISTERED))
                     {   sensor_slot[slot_count] = YES;  // the success of registration is stored
                         sensor_status[slot_count] = RECENTLY_CONNECTED;  //This is used for census reporting
@@ -3800,7 +3819,7 @@ void initialize_slave(void)
         not_first_start = YES;          // no longer the first power up.
         status = READY;                 // this might not get reset after a power failure
         reporting_data = NO;            // send data only when requested
-        going_to_unit = DEFAULT_MASTER; // slaves only talk to masters
+        unit_talking_to = DEFAULT_MASTER; // slaves only talk to masters
         e_sample_count = 0;             // start the sample count at zero
 }
 
@@ -3812,10 +3831,10 @@ void common_startup(void)
                                     // previously configured port settings
     coax_reset();                   // Put Master's eUSCI in reset
     SMCLK_OFF;                      // Turn off the SMCLK -- only used during UART transmissions
-    STOP_RANDOM_TIMER;              // Turn off the random interval timer
+    STOP_SHORT_TIMER;              // Turn off the random interval timer
     STOP_MSEC_TIMER;
     watchdog_reset();               // Remove hold from watchdog
-    going_to_bank = this_bank = TURTLE_SENSE_BANK;   //we'll just be using one bank of sensors
+    bank_talking_to = this_bank = TURTLE_SENSE_BANK;   //we'll just be using one bank of sensors
     current_command_bank = CORE_COMMAND_BANK;                   //and one bank of commands
     interval_limit = INTERVALS;
     interval_count = 0;             // reset the interval clock
@@ -3848,33 +3867,43 @@ void slave()
 // There are two modes, suspended mode (suspended = YES) and not suspended mode (suspended = NO)
 // Suspended mode is for when the cell phone board is on and reporting data
         if (suspended)                  // hopefully we won't go out of synch in a few minutes
-        {   if (interval_count == 1)  // listen for messages during interval one, but don't disconnect if there aren't any
-            {   if (receive_message())      // any messages now are about sending data
-                {   if (received_command == SEND_DATA)
-                    {   record_number = 0;   // start with the first record
+        {
+            if (interval_count == 1)  // listen for messages during interval one, but don't disconnect if there aren't any
+            {
+                if (receive_message())      // any messages now are about sending data
+                {
+                    if (received_command == SEND_DATA)
+                    {
+                        record_number = 0;   // start with the first record
                         reporting_data = send_records();     // set up data reporting and sends a block of data
 
                     }                                        // TRUE = Still reporting, FALSE  = Done
                     else if (received_command == WAKE_UP)    // WAKE_UP is the command to end suspended mode
-                    {    suspended = NO;
+                    {
+                        suspended = NO;
                     }
                 }
             }
-            else if (reporting_data)                    // the data gets sent in chunks during each interval
-                reporting_data = send_records();         // The flag is reset when the last record is set.
+            else if ( (reporting_data)                // the data gets sent in chunks during each interval
+                && (receive_message())              // any messages now are about sending data
+                && (received_command == SEND_DATA) )
+                reporting_data = send_records();    // The flag is reset when the last record is set.
         }
 // If not suspended mode, the units handshake their status during their assigned slot
 // interval zero is always just for resynching
         else switch (interval_count)
-        {   case 0:
+        {
+            case 0:
                 if ( receive_message()
                     && (received_command == SYNCH)                 // if no error receiving
                     && (received_command_bank == CORE_COMMAND_BANK) )
                     // and the command is to synch all devices,
-                {   synch_event_clock();                // if so, synchronize our watches
+                {
+                    synch_event_clock();                // if so, synchronize our watches
                 }
                 else
-                {   slave_registered = NO;              // otherwise give up and re-register
+                {
+                    slave_registered = NO;              // otherwise give up and re-register
                     this_unit = DEFAULT_SLAVE;          // release the slot
                     synch_slave();                      // and get in synch with what is happening
                 }
@@ -3890,10 +3919,13 @@ void slave()
                 interval_count = 1;     // was there an interrupt generated by resetting the clock?
                 // This is also be the interval for registerring
                 if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
-                {   if ( (receive_message())          // and there's no error receiving the message
+                {
+                    if ( (receive_message())          // and there's no error receiving the message
                         && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
-                    {   if (get_registered())           // register the sensor and assign it an interval
-                        {   status = READY;             // if the interval is non-zero we are connected and ready
+                    {
+                        if (get_registered())           // register the sensor and assign it an interval
+                        {
+                            status = READY;             // if the interval is non-zero we are connected and ready
                             slave_registered = YES;
                         }
                     }
@@ -3901,9 +3933,10 @@ void slave()
                 // and for going in and out of suspend mode during data reporting
                 else if ( (receive_message())       // only if registered.
                     && (received_command == SUSPEND) )
-                    {   suspended = YES;            // go into suspend mode if commanded
-                        wait_for_last_cycle();      // wait until the last interval
-                    }
+                {
+                    suspended = YES;            // go into suspend mode if commanded
+                    wait_for_last_cycle();      // wait until the last interval
+                }
                 break;
 
             default:
@@ -3942,7 +3975,7 @@ void slave()
 // sends commands to the smart sensor and controls reporting via
 // Janus Plug-in terminus boards
 void master()
-{   unsigned char unable_to_register_count=0;
+{ unsigned char unable_to_register_count=0;
     master_settings();                  // I/O settings for master board
     common_startup();               // Configuration settings common to both MASTER and SLAVE
     COAX_POWER_DISABLE;             // Turn off power to the sensors.  This is to insure that they didn't
@@ -3977,24 +4010,28 @@ void master()
     data_ready = new_census = NO;
     time_to_wakeup = NO;
     device_count = new_device_count = 0;
-//     if (rec_count) send_old_data();  // send old data if there is any after WD reset
+//  if (rec_count) send_old_data();  // send old data if there is any after WD reset
 //TODO// take a census after reset and continue with any sensors that respond.
     while(TRUE)                     // loop forever
-    {   ENTER_LOW_POWER_MODE_3;     // wait until the next 1/8 sec clock interval
+    {
+        ENTER_LOW_POWER_MODE_3;     // wait until the next 1/8 sec clock interval
         coax_reset();               // get rid of any UART garbage
         if (interval_count == 0)                // interval zero is always just for resynching
-        {       going_to_unit = ALL_UNITS;      // everyone synchs their clock
-                if (coax_short_message(SYNCH) ) //send the message
-                    blink(1);                   // blink every 6 seconds
-                GREEN_LED_OFF;
-                      //TODO// does there need to be any error checking for tx?
-                // Interval one is used for commands going to all sensors
-                // because they are all already listening and synched.
+        {
+            unit_talking_to = ALL_UNITS;      // everyone synchs their clock
+            if (coax_short_message(SYNCH) ) //send the message
+                blink(1);                   // blink every 6 seconds
+            GREEN_LED_OFF;
+                  //TODO// does there need to be any error checking for tx?
+            // Interval one is used for commands going to all sensors
+            // because they are all already listening and synched.
         }
         else if (interval_count == 1)   // this is the time slot for finding newly connected sensors (one per cycle)
-        {   going_to_unit = ALL_UNITS;
+        {
+            unit_talking_to = ALL_UNITS;
             if (new_census)             // if there was any change to the list of devices connected
-            {   coax_short_message(SUSPEND);    // tells the sensors that they should not expect a handshake
+            {
+                coax_short_message(SUSPEND);    // tells the sensors that they should not expect a handshake
                 intervals_on = NO;              // no timing interupts for now
                 phone_on();                     // turn on the phone
                 report_in();                    // update status logs
@@ -4046,18 +4083,22 @@ void master()
 
         }
         else if (device_count)       // if devices are connectd
-        {   if (interval_count > 1)    // this is the default for all connected sensors.  It checks that they are still connected
+        {
+            if (interval_count > 1)    // this is the default for all connected sensors.  It checks that they are still connected
             {                          // and deregisters them if they do not respond to a status inquiry
                 if (sensor_slot[interval_count] == YES)  // only check on an slot if a slave has been registered there (= 1)
-                {   going_to_unit = interval_count;    // set the recipient to match the interval
+                {
+                    unit_talking_to = interval_count;    // set the recipient to match the interval
                     if (tx_rx(STATUS))                  // If we are successful sending a status message and receiving a reply
-                    {   GREEN_LED_OFF;                  // The Green LED will blink once when a sensor is connected and registerred
+                    {
+                        GREEN_LED_OFF;                  // The Green LED will blink once when a sensor is connected and registerred
                         if (master_routines())          // decide what to do about the sensor's status
                             coax_short_message(SIGN_OFF);   // All is good, send a SIGN_OUT message
                     }
                     if (tx_error == TIMEOUT_ERROR)
-                    {   sensor_slot[going_to_unit]= NO; // deregisiter whatever sensor was there
-                        sensor_status[going_to_unit]= RECENTLY_DISCONNECTED;
+                    {
+                        sensor_slot[unit_talking_to]= NO; // deregisiter whatever sensor was there
+                        sensor_status[unit_talking_to]= RECENTLY_DISCONNECTED;
                         device_count--;                 // one less device
                         new_census = YES;               // flag that we need to report the removal of devices
                         tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
