@@ -19,7 +19,7 @@
 
 #define MASTER 0
 #define SLAVE  1
-#define THIS_UNIT SLAVE
+#define THIS_UNIT MASTER
 
 /*
        /////////////////////////////////////////////////////////////////////////////////////////////
@@ -63,6 +63,7 @@
 #define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
 #define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
 
+
 #define USER_PASSWORD "ABCDEFGH"  // 8 character password needed for program or parameter downloads.  Recompile with a different password.
 
 
@@ -71,12 +72,12 @@
 
 // The following is only necessary for compiling a SMART SENSOR slave
        // SMART SENSOR IDENTIFICATION
-#define NEST_ID "123456.000,060914,S-AA0003"
+#define NEST_ID "123456.000,060914,M-AA0002"
        // The last 6 digits is a unique serial number for each smart sensor.
        // Update the last 6 digits before compiling for each new device.
        // The rest of the data will be updated during each new registration with a master
        // What you see here is just an example of what it could look like
-#define SERIAL_NUMBER "S-AA0003"   // Unique serial number for each device.  Update before compiling for a new device
+#define SERIAL_NUMBER "M-AA0002"   // Unique serial number for each device.  Update before compiling for a new device
 #define SERIAL_ID_LEN   8          // length of serial number string (don't change without changing all the places this is used)
        // PHASE THREE SERIAL NUMBER TEMPLATES
        // M-AA####  -- Master device
@@ -112,7 +113,7 @@
    3(M)    AUX12.1     1.2     Opt     Opt     Opt     Opt     Opt     Opt     J12 connector pin 2 AUX I/O
    3(S)    COMP_OUT    1.2     COMPARTOR OUTPUT                                Comparator output for Moisture Sensor
    4(M)    BattMon     3.0     ADC     n/a     n/a     ADC     n/a     n/a     Analogue input for reading battery voltage
-   4(S)    COMP-IN     3.0     COMPARATOR NEGATIVE INPUT                      Comparator minus input for moisture sensor
+   4(S)    COMP-IN     3.0     COMPARATOR NEGATIVE INPUT                       Comparator minus input for moisture sensor
    5(M)    PhnReset    3.1     OUT-LO  ---     ---     OUT     Hi-Z    LOW     Phone Reset (hold low to reset)
    5(S)    COMP+IN     3.1     COMPARATOR POSITIVE INPUT                       Comparator positive input for moisture sensor
    6(M)    AUX14.1     3.2     Opt     Opt     Opt     Opt     Opt     Opt     J14 connector pin 1 AUX I/O
@@ -759,12 +760,14 @@
     ////// Data  recording and reporting
     volatile unsigned int  last_temperature;        // the last temperature reading
     volatile unsigned int  day_of_year;             // the number of days elapsed so far this year
-    volatile unsigned int battery_level;            // 0 = battery dead, 100 = fully charged
-    const char battery_percents[]= { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-                                    10,12,15,20,25,30,40,50,60,70,
-                                    75,80,85,88,90,91,92,93,94,95,
-                                    96,97,98,99,100,101};
+    volatile unsigned char battery_type = 0;        // brand of battery for different discharge curves in battery_levels //TODO//
+    volatile unsigned int battery_level = 17;       // 0 = battery dead, 34 = fully charged (until written, set at 50%)
+    const int battery_percents[]= { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                                    0x10, 0x12, 0x15, 0x20, 0x25, 0x30, 0x40, 0x50, 0x60, 0x70,
+                                    0x75, 0x80, 0x85, 0x88, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
+                                    0x96, 0x97, 0x98, 0x99, 0x0100};  // values from 1 to 99 can be output without having to convert from hex
     const int battery_levels[] =  {650,670,675};    //TODO// to be created with battery levels that correspond to the percents
+            // battery_level needs to be set by comparing the ADC reading of the battery level to the battery_levels[] array.
     volatile unsigned int rec_count;                // The count of how many records have been collected since last upload
     volatile unsigned int recs_reported;            // The total of how many records have been received for reporting
     volatile unsigned long int sec_count;           // the number of seconds since the last report
@@ -782,7 +785,7 @@
     volatile unsigned char status;                  // the current status of the slave (ready, busy, etc...)
     volatile unsigned char connection_code;         // a value returned by the AT CREG command that indicates the connection status
     volatile unsigned char device_count;                    // the number of devices connected to the master
-    volatile unsigned char new_device_count;        // a count of how many new devices were recently
+    volatile unsigned char changed_device_count;        // a count of how many new devices were recently
     volatile unsigned int  random;                  // a random number used by the random timer to wait a random amount of time
 
 #define SENSOR_SLOTS 0x30   // start out with 48 intervals and 48 slots
@@ -792,6 +795,8 @@
      unsigned char sensor_status[SENSOR_SLOTS];     // 0 = no unreported change, 1 = recently connected, 2 = recently disconnected
      volatile unsigned int  report_number[SENSOR_SLOTS];    // the number of the report for today (starts at 1)
      volatile unsigned int  last_report_day[SENSOR_SLOTS];  // the day of the year the last report was sent
+
+
 
 
 //// Sensor Status Values ////
@@ -978,7 +983,8 @@ unsigned char new_parameters[40]= {
 ////////////   REPORT GENERATION   /////////////////////
 ////////////////////////////////////////////////////////
 
-    // AT codes and strings for phone  -- the back slash is for adding quotes \r = CR
+    // AT codes and strings for phone
+    // If the command is complete it ends with a CR (\r)
     unsigned char *messages[] = {
             "\r",               // messages[0] Not used (marks end of script)
             "ATE0 V0\r",        // messages[1] Turn off echo, return error codes only 0=OK, 4=error
@@ -1013,8 +1019,17 @@ unsigned char new_parameters[40]= {
             " ",                // messages[20]
             " ",                // messages[21]
             " ",                // messages[22] LAST AT command
-            "\"\r",             // messages[23] end quotes and CR (end of file name -- special case for error checking)
-            "\r",               // messages[24] CR
+
+// no more complete AT commands after this point
+// messages 23 and 24 should not be modified
+
+            "\"\r",             // messages[23] end quotes and CR (end of file name -- special case)
+                                // A one second pause is added after the CR is sent
+            "\r",               // messages[24] CR without a pause
+
+// Any AT commands after this point are incomplete and need to be followed by an END_OF_FILENAME in the script.
+// These messages are also used for text headings in reports and logs.
+
             "AT#FTPAPP=\"",     // messages[25] Append to existing file and upload (file name must be added)
             "AT#FTPGET",        // messages[26] Read parameter file
             "AT#FTPDELE",       // messages[27] Delete parameter file
@@ -1069,10 +1084,22 @@ unsigned char new_parameters[40]= {
             "ACTIVITY_LOG_",        // messages[76]
             "EVENT: ",              // messages[77]
             ", Min, Max",           // messages[78]
-            "2001-01-01,01:01:00",  // messages[79] Temporary storage of the time of previous report
-                                    //              not updated by census reports, only by data reporting
+            "2001-01-01,01:01:00",      // messages[79] Temporary storage of the time of previous report
+                                        //              not updated by census reports, only by data reporting
+            "Samples per integration: ",// messages[80]
+            "ADXL data rate: ",         // messages[81]
+            "Battery type: ",           // messages[82]
+            "Eneloop",                  // messages[83]
+            "Corun",                    // messages[84]
+            "Battery type 2",           // messages[85]
+            "Battery type 3",           // messages[86]
+            "Battery type 4",           // messages[87]
+            "Battery type 5",           // messages[88]
+            "DISCHARGED",               // messages[89]
+            "Maximum charge",           // messages[90]
+            " percent charged"          // messages[91]
             };
-                                    // If the command is complete it ends with a CR (\r)
+
 
      /////////////////Script Tokens//////////////////////
 
@@ -1156,6 +1183,19 @@ unsigned char new_parameters[40]= {
 #define TXT_EVENT           77  //  "EVENT: "
 #define TXT_MIN_MAX         78  //  ", Min, Max"
 #define LAST_REPORT_TIME    79  //
+#define TXT_INTEGRATION     80  //  "Samples per integration: "
+#define TXT_ADXL_ORD        81  //  "ADXL data rate: "
+#define TXT_BATTERY_TYPE    82  //  "Battery type: "
+#define BATTERY_TYPE_0      83  //  "Eneloop"
+#define BATTERY_TYPE_1      84  //  "Corun"
+#define BATTERY_TYPE_2      85  //  "Battery type 2"   available for future battery arrays
+#define BATTERY_TYPE_3      86  //  "Battery type 3"
+#define BATTERY_TYPE_4      87  //  "Battery type 4"
+#define BATTERY_TYPE_5      88  //  "Battery type 5"
+#define TXT_DISCHARGED      89  //  "DISCHARGED"
+#define TXT_MAX_CHARGE      90  //  "Maximum charge"
+#define TXT_PERCENT         91  //  " percent charged"
+
      //      CREG codes
 #define CELL_NOT_REGISTERED 0       //      0 - not registered, ME is not currently searching a new operator to
                                     //          register to (bad reception?  antenna disconnected?
@@ -1340,12 +1380,12 @@ unsigned char new_parameters[40]= {
                     // The bins increase exponentially by a factor of the square root of two (about 3db amplitude per bin)
 
     volatile unsigned int adc_read;                 // The data read in the adc interrupt routine
-    volatile signed int aXold[32];                  //  an array of previous acc values, to determine delta acc
-    volatile signed int aYold[32];
-    volatile signed int aZold[32];
-    volatile signed int aXlast = 0;                  // previous acc values, to determine delta acc
-    volatile signed int aYlast = 0;
-    volatile signed int aZlast = 0;
+    volatile signed int ax_old[32];                  //  an array of previous acc values, to determine delta acc
+    volatile signed int ay_old[32];
+    volatile signed int az_old[32];
+    volatile signed int ax_last = 0;                  // previous acc values, to determine delta acc
+    volatile signed int ay_last = 0;
+    volatile signed int az_last = 0;
     volatile unsigned char not_first_read = NO;         // reset everytime a new integration starts
     volatile unsigned long long int e_integrated[7];    // Running totals for each ODR
     volatile unsigned int e_sample_count;               // the number of samples added together so far
@@ -2169,7 +2209,7 @@ void escape_and_close(void)
 
 
 // send out records in the report
-void report_record_data(void)
+void report_data(void)
 {   unsigned char line_count;
     unsigned char char_count;
     not_timed_out = YES;        //TODO// make timeouts work!
@@ -2183,7 +2223,7 @@ void report_record_data(void)
         for (char_count = 0; char_count < RECORD_BYTES; char_count +=2) // go through them two by two
         {   send_byte(data.energy[line_count][char_count]);             // send first byte of data (high)
             send_byte(data.energy[line_count][char_count+1]);           // send second byte of data (low)
-            if (char_count < RECORD_BYTES ) send_message(COMMA);        // send a comma except at the end of the line
+            if (char_count < RECORD_BYTES - 1 ) send_message(COMMA);    // send a comma except at the end of the line
         }
         send_message(CR);            // send a carriage return
     }
@@ -2198,9 +2238,28 @@ void send_report(void)
         send_byte(PARAM_SLOWREC_HI_NOW);    // High byte of seconds per record
         send_byte(PARAM_SLOWREC_LO_NOW);    // Low byte of seconds per record
         send_message(TXT_NUM_RECS);         // # of records
-        send_integer(recs_reported);        // print the rec_count
-        send_message(TXT_BATTERY_LEVEL);    // battery level
-        send_integer(battery_level);        // print the battery level
+        send_integer(recs_reported);        // the rec_count
+        send_message(TXT_BATTERY_TYPE);     // the heading for the battery type
+        send_message(BATTERY_TYPE_0 + battery_type);    // the battery type
+        send_message(TXT_BATTERY_LEVEL);    // battery level heading
+        if (battery_level)
+        {
+            if (battery_level<34)
+            {
+                send_integer(battery_percents[battery_level]);  // print the battery level
+                send_message(TXT_PERCENT);
+            }
+            else
+            {
+                send_message(TXT_MAX_CHARGE);
+            }
+        }
+        else
+        {
+            send_message(TXT_DISCHARGED);
+        }
+        send_message(TXT_INTEGRATION);
+
         do_script(ODR_script);
     }
     else                                    // Otherwise print the report without headings
@@ -2210,12 +2269,11 @@ void send_report(void)
         send_message(CR);                   // send a carriage return
         send_integer(recs_reported);        // print the rec_count
         send_message(CR);                   // send a carriage return
-        send_integer(battery_level );       // print the battery level
-        send_message(CR);                   // send a carriage return
+        send_integer(battery_percents[battery_level]);  // print the battery level
         send_message(CR);                   // send a carriage return
         send_message(CR);                   // send a carriage return
     }
-    report_record_data();                   // send all the data
+    report_data();                   // send all the data
                                                                 // conditional lines sent at the end
 //    if (new_parameters_loaded) send_message(TXT_NEW_SETTINGS);  // send new parameters loaded message
 //    if (force_shut_down) send_message(TXT_LOW_BATTERY);         // send shutdown warning
@@ -2271,12 +2329,12 @@ void send_census(void)
     {   if (sensor_status[slot_count] > NO_UNREPORTED_CHANGE)  // If non-zero the sensor was either recently connected or disconnected
         {   move_string(sensor_ids[slot_count], 0, SERIAL_ID_LEN, messages[SENSOR_ID], 0);// move the sensor_id
             report_event();                 // update the logs
-            get_new_parameters();           // upload a new set of paramters if they are available
-            if (new_parameters_loaded)
-            {   sensor_status[slot_count] = NEW_PARAMETERS_FOUND;
-                report_event();   // record the success of newly loaded parameters
+//            get_new_parameters();           // upload a new set of parameters if they are available
+//            if (new_parameters_loaded)
+//            {   sensor_status[slot_count] = NEW_PARAMETERS_FOUND;
+//                report_event();   // record the success of newly loaded parameters
                 //TODO// send the new parameters to the sensor
-            }
+//            }
             sensor_status[slot_count] = NO_UNREPORTED_CHANGE;
             wait_a_sec(1);       // pause between reports
         }
@@ -2640,10 +2698,10 @@ void process_bin_data(void)
 {   unsigned int x;
     unsigned long int bin_mask;
     char bin_count;
-    signed int tempX, tempY, tempZ;         // temp values
-    signed int aX, aY, aZ;                  // value of accelerometer for each coordinate
-    signed long int dX, dY, dZ;             // difference values for each coordinate
-    signed long int mag_squared;            // absolute magnitude of vector squared (dX^2 + dY^2 +dZ^2)
+    signed int temp_x, temp_y, temp_z;         // temp values
+    signed int ax, ay, az;                  // value of accelerometer for each coordinate
+    signed long int dx, dy, dz;             // difference values for each coordinate
+    signed long int mag_squared;            // absolute magnitude of vector squared (dx^2 + dy^2 +dz^2)
         //Skip over bad data and synch up with the good data
     not_first_read = NO;
     for (x=0; x< DATA_BUFFER_SIZE-3 && !( ((spi_buffer[x] & X_READING) == X_READING) &&
@@ -2651,27 +2709,27 @@ void process_bin_data(void)
                                         ((spi_buffer[x+2] & Z_READING) == Z_READING)  );   x++ );
     while (x<DATA_BUFFER_SIZE)
     {           // process good data to find the "jerk" (third derivative of displacement)
-        tempX=spi_buffer[x];    // store x so we can use it several times efficiently
+        temp_x=spi_buffer[x];    // store x so we can use it several times efficiently
         spi_buffer[x] = 0;      // erase the buffer for next time
-        tempY=spi_buffer[x+1];  // same for y
+        temp_y=spi_buffer[x+1];  // same for y
         spi_buffer[x+1] = 0;
-        tempZ=spi_buffer[x+2];  // same for z
+        temp_z=spi_buffer[x+2];  // same for z
         spi_buffer[x+2] = 0;
                                                         // process only non-zero readings
-        if (    ((tempX & XYZ_PINS) == X_READING) &&    // X readings start with top two bits = 00
-                ((tempY & XYZ_PINS) == Y_READING) &&    // Y readings start with top two bits = 01
-                ((tempZ & XYZ_PINS) == Z_READING) )     // Z readings start with top two bits = 11
+        if (    ((temp_x & XYZ_PINS) == X_READING) &&    // X readings start with top two bits = 00
+                ((temp_y & XYZ_PINS) == Y_READING) &&    // Y readings start with top two bits = 01
+                ((temp_z & XYZ_PINS) == Z_READING) )     // Z readings start with top two bits = 11
         {        // make the data proper 16 bit integers
-            aX= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
-            aY= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
-            aZ= (tempZ & ADXL_MASK) | ((tempZ & NEG_MASK)<<2);
+            ax= (temp_x & ADXL_MASK) | ((temp_x & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
+            ay= (temp_y & ADXL_MASK) | ((temp_y & NEG_MASK)<<2);
+            az= (temp_z & ADXL_MASK) | ((temp_z & NEG_MASK)<<2);
             if ( not_first_read )       // sum up the deltas with the previous readings
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
-                dX= (aX - aXlast);               // compute the differences
-                dY= (aY - aYlast);
-                dZ= (aZ - aZlast);
-                mag_squared = square(dX) + square(dY) + square(dZ);  // sum the square of the differences
+                dx= (ax - ax_last);               // compute the differences
+                dy= (ay - ay_last);
+                dz= (az - az_last);
+                mag_squared = square(dx) + square(dy) + square(dz);  // sum the square of the differences
                     // bin 29 (28 counting from bin 0) is the highest bit possible (but very unlikely)
                 bin_mask = JOLT_MASK;           // Start looking at the highest bit possible
                 for (bin_count=JOLT_BITS-1; (bin_count) && ((bin_mask & mag_squared) == 0); bin_count--)
@@ -2684,13 +2742,13 @@ void process_bin_data(void)
             {   not_first_read = TRUE ;
                         // Save the first reading off the stack in the orientation log
             // TODO // make this an average reading
-                data.bins[rec_count][X_POS] = aX;
-                data.bins[rec_count][Y_POS] = aY;
-                data.bins[rec_count][Z_POS] = aZ;
-            }           // save the reading for next time in aXold, aYold, and aZold
-            aXlast = aX;
-            aYlast = aY;
-            aZlast = aZ;
+                data.bins[rec_count][X_POS] = ax;
+                data.bins[rec_count][Y_POS] = ay;
+                data.bins[rec_count][Z_POS] = az;
+            }           // save the reading for next time in ax_old, ay_old, and az_old
+            ax_last = ax;
+            ay_last = ay;
+            az_last = az;
         }
         x = x+3;        // increment the counter to look at the next readings
     }
@@ -2708,7 +2766,7 @@ void process_bin_data(void)
 // The default record size is 30 minutes.
 void integrate_data(void)
 {   unsigned int x;                 //counter
-    signed int tempX, tempY, tempZ; // temp values
+    signed int temp_x, temp_y, temp_z; // temp values
     signed int acc_x, acc_y, acc_z; // value of accelerometer for each coordinate
     signed int dif_x, dif_y, dif_z; // difference values for each coordinate
     unsigned long int d_squared;    // The sum of the squares of dx, dy and dz
@@ -2726,28 +2784,28 @@ void integrate_data(void)
                                         ((spi_buffer[x+2] & Z_READING) == Z_READING)  );   x++ );
     while (x<DATA_BUFFER_SIZE)
     {           // process good data to find the "jerk" (third derivative of displacement)
-        tempX=spi_buffer[x];    // store x so we can use it several times efficiently
+        temp_x=spi_buffer[x];    // store x so we can use it several times efficiently
         spi_buffer[x] = 0;      // erase the buffer for next time
-        tempY=spi_buffer[x+1];  // same for y
+        temp_y=spi_buffer[x+1];  // same for y
         spi_buffer[x+1] = 0;
-        tempZ=spi_buffer[x+2];  // same for z
+        temp_z=spi_buffer[x+2];  // same for z
         spi_buffer[x+2] = 0;
         // process only non-zero readings
-        if (  ((tempX & XYZ_PINS) == X_READING) &&    // X readings start with top two bits = 00
-              ((tempY & XYZ_PINS) == Y_READING) &&    // Y readings start with top two bits = 01
-              ((tempZ & XYZ_PINS) == Z_READING) )     // Z readings start with top two bits = 11
+        if (  ((temp_x & XYZ_PINS) == X_READING) &&    // X readings start with top two bits = 00
+              ((temp_y & XYZ_PINS) == Y_READING) &&    // Y readings start with top two bits = 01
+              ((temp_z & XYZ_PINS) == Z_READING) )     // Z readings start with top two bits = 11
         {        // make the data proper 16 bit integers
-            acc_x= (tempX & ADXL_MASK) | ((tempX & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
-            acc_y= (tempY & ADXL_MASK) | ((tempY & NEG_MASK)<<2);
-            acc_z= (tempZ & ADXL_MASK) | ((tempZ & NEG_MASK)<<2);
+            acc_x= (temp_x & ADXL_MASK) | ((temp_x & NEG_MASK)<<2);  // mask off the top 2 bits and copy the sign bits there
+            acc_y= (temp_y & ADXL_MASK) | ((temp_y & NEG_MASK)<<2);
+            acc_z= (temp_z & ADXL_MASK) | ((temp_z & NEG_MASK)<<2);
                  // integrate the data for multiple ODRs
             if ( not_first_read )       // skip the first reading, nothing to subtract!
             {       // skip the first read because the delta will be very high
                     // analyzing the square of delta ACCELERATION (turns a 12 bit signed data into an unsigned 25 bit number)
                 old_offset = (sample_offset + 0x1F) & 0x1F ; // subtract 1, but 0 becomes 0x1F
-                dif_x= (acc_x - aXold[old_offset]);           // compute the differences
-                dif_y= (acc_y - aYold[old_offset]);
-                dif_z= (acc_z - aZold[old_offset]);
+                dif_x= (acc_x - ax_old[old_offset]);           // compute the differences
+                dif_y= (acc_y - ay_old[old_offset]);
+                dif_z= (acc_z - az_old[old_offset]);
                 // sum the square of the differences for the highest data rates
                 d_squared  = square(dif_x) + square(dif_y) + square(dif_z);
                 // see if it is more than the reportable max
@@ -2761,9 +2819,9 @@ void integrate_data(void)
                     && ( (old_offset = old_odr_sample[sample_offset]) < e_sample_count) );
                 // skip if we don't care about that sample rate or there is no old sample to compare to
                 {   // for the other data rates, each of the 32 samples looks at a different stored sample
-                    dif_x= (acc_x - aXold[old_offset]);           // compute the differences for other data rates
-                    dif_y= (acc_y - aYold[old_offset]);
-                    dif_z= (acc_z - aZold[old_offset]);
+                    dif_x= (acc_x - ax_old[old_offset]);           // compute the differences for other data rates
+                    dif_y= (acc_y - ay_old[old_offset]);
+                    dif_z= (acc_z - az_old[old_offset]);
                     e_integrated[other_odr] += ( square(dif_x) + square(dif_y) + square(dif_z) );
                     // sum the square of the differences and add to the corresponding accumulators for the other rates
                 }
@@ -2796,10 +2854,10 @@ void integrate_data(void)
                 data.energy[rec_count][MOISTURE_HI] = p[1];
                 data.energy[rec_count][MOISTURE_LO] = p[0];
             }
-            // save the reading for next time in aXold, aYold, and aZold
-            aXold[sample_offset] = acc_x;
-            aYold[sample_offset] = acc_y;
-            aZold[sample_offset] = acc_z;
+            // save the reading for next time in ax_old, ay_old, and az_old
+            ax_old[sample_offset] = acc_x;
+            ay_old[sample_offset] = acc_y;
+            az_old[sample_offset] = acc_z;
             sample_offset = ((sample_offset + 1) & 0x1F );      // cycle from 0 to 31, 32 becomes 0
             e_sample_count++;   // keep track of how many samples have been added to the fastest ODR integration
                                 // finish up a record if we've reached the limit
@@ -2845,10 +2903,10 @@ void integrate_data(void)
                 data.energy[rec_count][PEAK_DIF_LO] = p[0];
                                         // save the peak diff for this record
                 max_d_squared = 0;      // reset the peak dif for the next record
+                if (rec_count < MAX_RECORDS - 1) rec_count++;            // move on to the next record if there is room
                 if (rec_count >= max_records)
                     status = DATA_READY;// status is ready to report in data
                     // data collection continues in overflow records if needed
-                if (rec_count < MAX_RECORDS - 1) rec_count++;            // move on to the next record if there is room
                 rec_secs = 0;           // reset the second counter
             }
             x += 3;             // process the next set of 3
@@ -3975,7 +4033,7 @@ void slave()
 // sends commands to the smart sensor and controls reporting via
 // Janus Plug-in terminus boards
 void master()
-{ unsigned char unable_to_register_count=0;
+{ unsigned char wait_to_register_count=0;
     master_settings();                  // I/O settings for master board
     common_startup();               // Configuration settings common to both MASTER and SLAVE
     COAX_POWER_DISABLE;             // Turn off power to the sensors.  This is to insure that they didn't
@@ -4009,7 +4067,7 @@ void master()
     intervals_on = YES;             // start with the phone off
     data_ready = new_census = NO;
     time_to_wakeup = NO;
-    device_count = new_device_count = 0;
+    device_count = changed_device_count = 0;
 //  if (rec_count) send_old_data();  // send old data if there is any after WD reset
 //TODO// take a census after reset and continue with any sensors that respond.
     while(TRUE)                     // loop forever
@@ -4032,43 +4090,43 @@ void master()
             if (new_census)             // if there was any change to the list of devices connected
             {
                 coax_short_message(SUSPEND);    // tells the sensors that they should not expect a handshake
-                intervals_on = NO;              // no timing interupts for now
+                intervals_on = NO;              // no timing interrupts for now
                 phone_on();                     // turn on the phone
                 report_in();                    // update status logs
                 time_to_wakeup = YES;           // this flags that suspend is off.
-                intervals_on = YES;
-                new_census = NO;
-                new_device_count = 0;           // reset the counter of new devices
+                intervals_on = YES;             // turn the timing interrupts back on
+                new_census = NO;                // clear the census flag
+                changed_device_count = 0;       // reset the counter of changed devices
                 wait_for_last_cycle();          // wait until the last interval
             }
-            else if (data_ready)       //
+            else if (data_ready)       // if any of the devices is ready to report data they all do
             {
-                coax_short_message(SUSPEND);
+                coax_short_message(SUSPEND);    // suspend synching up and handshaking while reporting data
                 intervals_on = NO;              // no timing interupts for now
-                phone_on();
+                phone_on();                     // turn on the power supply for the phone and turn the phone on
                 phone_in(); // send in a report for each slave
                             // wakes up the slaves with data one by one
                             // uploads the data to the cloud
-                time_to_wakeup = YES;
-                intervals_on = YES;
-                data_ready = NO;
-                wait_for_last_cycle();
+                time_to_wakeup = YES;           // signal that we're done for the next time we are at interval one
+                intervals_on = YES;             // turn timing interrupts back on
+                data_ready = NO;                // clear the flag that data is ready for reporting
+                wait_for_last_cycle();          // wait until the last timing interval so that the next one is interval zero
             }
-            else if (time_to_wakeup)
+            else if (time_to_wakeup)    // check the flag set after phoning in that it is time to get the devices out of suspend mode
             {
-                coax_short_message(WAKE_UP);
-                time_to_wakeup = NO;
+                coax_short_message(WAKE_UP);    // Send the WAKE_UP message to end suspend mode
+                time_to_wakeup = NO;            // reset the flag that got us here
             }
-            else if (register_device())
+            else if (register_device()) // if no other flags were set, check to see if any new devices have been connected
             {
-                GREEN_LED_ON;
-                new_device_count ++;
-                unable_to_register_count = 0;
+                GREEN_LED_ON;                   // The green LED signifies that a device was connected
+                changed_device_count ++;        // Keep a count of how many devices have been changed
+                wait_to_register_count = 0;     // reset the counter to wait a while before reporting in the new census
             }
-            else if (unable_to_register_count < REGISTRATION_WAIT)
-                unable_to_register_count++; // wait some more before reporting
-            else if (new_device_count)     // if all else fails and enough time has elapsed
-                new_census = YES;           // flag that we are ready to report status changes
+            else if (wait_to_register_count < REGISTRATION_WAIT)    // If it is not yet time to report the new census
+                wait_to_register_count++;       // wait some more before reporting
+            else if (changed_device_count)      // if all else fails, and there are device changes, then enough time has elapsed
+                new_census = YES;               // flag that we are ready to report status changes
 
   // Reports new connections after there is no further response
   // All phone communications are set up during this interval.  All the sensors are put into suspend mode,
@@ -4082,33 +4140,32 @@ void master()
   // most frequently will determine the frequency at which all devices will report.
 
         }
-        else if (device_count)       // if devices are connectd
-        {
-            if (interval_count > 1)    // this is the default for all connected sensors.  It checks that they are still connected
-            {                          // and deregisters them if they do not respond to a status inquiry
-                if (sensor_slot[interval_count] == YES)  // only check on an slot if a slave has been registered there (= 1)
+        else if (device_count)          // For all intervals greater than one, if devices are connectd
+        {                               // this is the default for all connected sensors.  It checks that they are still connected
+                                        // and deregisters them if they do not respond to a status inquiry
+            if (sensor_slot[interval_count] == YES)  // only check on an slot if a slave has been registered there (= 1)
+            {
+                unit_talking_to = interval_count;    // set the recipient to match the interval
+                if (tx_rx(STATUS))                  // If we are successful sending a status message and receiving a reply
                 {
-                    unit_talking_to = interval_count;    // set the recipient to match the interval
-                    if (tx_rx(STATUS))                  // If we are successful sending a status message and receiving a reply
-                    {
-                        GREEN_LED_OFF;                  // The Green LED will blink once when a sensor is connected and registerred
-                        if (master_routines())          // decide what to do about the sensor's status
-                            coax_short_message(SIGN_OFF);   // All is good, send a SIGN_OUT message
-                    }
-                    if (tx_error == TIMEOUT_ERROR)
-                    {
-                        sensor_slot[unit_talking_to]= NO; // deregisiter whatever sensor was there
-                        sensor_status[unit_talking_to]= RECENTLY_DISCONNECTED;
-                        device_count--;                 // one less device
-                        new_census = YES;               // flag that we need to report the removal of devices
-                        tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
-                        RED_LED_ON;                     // long red led blink indicates disconnection
-                     }
+                    GREEN_LED_OFF;                  // The Green LED will blink once when a sensor is connected and registerred
+                    if (master_routines())          // decide what to do about the sensor's status
+                        coax_short_message(SIGN_OFF);   // All is good, send a SIGN_OUT message
                 }
-                else tx_error = NO_ERROR;
+                if (tx_error == TIMEOUT_ERROR)      // a TIMEOUT here means that nothing has responded
+                {
+                    sensor_slot[unit_talking_to]= NO; // deregisiter whatever sensor was there
+                    sensor_status[unit_talking_to]= RECENTLY_DISCONNECTED; // record the status
+                    device_count--;                 // one less device
+                    tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
+                    RED_LED_ON;                     // long red led blink indicates disconnection
+                    changed_device_count ++;        // Keep a count of how many devices have been changed
+                    wait_to_register_count = 0;     // reset the counter to wait a while before reporting in the new census
+                 }
             }
-           if (tx_error) blink(24);     // a longer blink for errors
-           if (!(interval_count & 0x0F)) blink(1);  //blink every 2 seconds (every 16 loops)
+            else tx_error = NO_ERROR;
+            if (tx_error) blink(24);     // a longer blink for errors
+            if (!(interval_count & 0x0F)) blink(1);  //blink every 2 seconds (every 16 loops)
         }
     }
 }
