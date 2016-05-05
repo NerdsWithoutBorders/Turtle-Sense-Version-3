@@ -72,12 +72,12 @@
 
 // The following is only necessary for compiling a SMART SENSOR slave
        // SMART SENSOR IDENTIFICATION
-#define NEST_ID "123456.000,060914,M-AA0002"
+#define NEST_ID "123456.000,060914,M-AA0001"
        // The last 6 digits is a unique serial number for each smart sensor.
        // Update the last 6 digits before compiling for each new device.
        // The rest of the data will be updated during each new registration with a master
        // What you see here is just an example of what it could look like
-#define SERIAL_NUMBER "M-AA0002"   // Unique serial number for each device.  Update before compiling for a new device
+#define SERIAL_NUMBER "M-AA0001"   // Unique serial number for each device.  Update before compiling for a new device
 #define SERIAL_ID_LEN   8          // length of serial number string (don't change without changing all the places this is used)
        // PHASE THREE SERIAL NUMBER TEMPLATES
        // M-AA####  -- Master device
@@ -762,10 +762,10 @@
     volatile unsigned int  day_of_year;             // the number of days elapsed so far this year
     volatile unsigned char battery_type = 0;        // brand of battery for different discharge curves in battery_levels //TODO//
     volatile unsigned int battery_level = 17;       // 0 = battery dead, 34 = fully charged (until written, set at 50%)
-    const int battery_percents[]= { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+    const char battery_percents[]= { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
                                     0x10, 0x12, 0x15, 0x20, 0x25, 0x30, 0x40, 0x50, 0x60, 0x70,
                                     0x75, 0x80, 0x85, 0x88, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
-                                    0x96, 0x97, 0x98, 0x99, 0x0100};  // values from 1 to 99 can be output without having to convert from hex
+                                    0x96, 0x97, 0x98, 0x99, 0x00};  // values from 1 to 99 can be output without having to convert from hex
     const int battery_levels[] =  {650,670,675};    //TODO// to be created with battery levels that correspond to the percents
             // battery_level needs to be set by comparing the ADC reading of the battery level to the battery_levels[] array.
     volatile unsigned int rec_count;                // The count of how many records have been collected since last upload
@@ -789,14 +789,15 @@
     volatile unsigned int  random;                  // a random number used by the random timer to wait a random amount of time
 
 #define SENSOR_SLOTS 0x30   // start out with 48 intervals and 48 slots
+#define PING_FAILURES_MAX 3  // the number of consecutive failures to constitute a disconnection
      unsigned char slot_count;                      // a counter to find slots
      unsigned char sensor_slot[SENSOR_SLOTS];       // 0 = empty, 1 = taken, 2 = suspended
      unsigned char sensor_ids[SENSOR_SLOTS][9];     // sensor serial numbers in each slot (or most recent ID)
      unsigned char sensor_status[SENSOR_SLOTS];     // 0 = no unreported change, 1 = recently connected, 2 = recently disconnected
+     unsigned char ping_failures[SENSOR_SLOTS];     // The number of times in a row that handshaking has failed
      volatile unsigned int  report_number[SENSOR_SLOTS];    // the number of the report for today (starts at 1)
      volatile unsigned int  last_report_day[SENSOR_SLOTS];  // the day of the year the last report was sent
-
-
+     unsigned char sensor_started[SENSOR_SLOTS][19];        // The stored time for the start of the report
 
 
 //// Sensor Status Values ////
@@ -1086,15 +1087,15 @@ unsigned char new_parameters[40]= {
             ", Min, Max",           // messages[78]
             "2001-01-01,01:01:00",      // messages[79] Temporary storage of the time of previous report
                                         //              not updated by census reports, only by data reporting
-            "Samples per integration: ",// messages[80]
-            "ADXL data rate: ",         // messages[81]
-            "Battery type: ",           // messages[82]
-            "Eneloop",                  // messages[83]
-            "Corun",                    // messages[84]
-            "Battery type 2",           // messages[85]
-            "Battery type 3",           // messages[86]
-            "Battery type 4",           // messages[87]
-            "Battery type 5",           // messages[88]
+            "\rSamples per integration: ",// messages[80]
+            "\rADXL data rate: ",       // messages[81]
+            "\rBattery type: ",         // messages[82]
+            "Eneloop         ",         // messages[83]  Room for 6 battery types, names are 16 chars or less
+            "Corun           ",         // messages[84]
+            "Battery type 2  ",         // messages[85]
+            "Battery type 3  ",         // messages[86]
+            "Battery type 4  ",         // messages[87]
+            "Battery type 5  ",         // messages[88]
             "DISCHARGED",               // messages[89]
             "Maximum charge",           // messages[90]
             " percent charged"          // messages[91]
@@ -2246,7 +2247,7 @@ void send_report(void)
         {
             if (battery_level<34)
             {
-                send_integer(battery_percents[battery_level]);  // print the battery level
+                send_byte(battery_percents[battery_level]);  // print the battery level
                 send_message(TXT_PERCENT);
             }
             else
@@ -2327,9 +2328,11 @@ void report_event(void)
 void send_census(void)
 {   for (slot_count = 2; slot_count < SENSOR_SLOTS; slot_count++)
     {   if (sensor_status[slot_count] > NO_UNREPORTED_CHANGE)  // If non-zero the sensor was either recently connected or disconnected
-        {   move_string(sensor_ids[slot_count], 0, SERIAL_ID_LEN, messages[SENSOR_ID], 0);// move the sensor_id
+        {
+            move_string(sensor_ids[slot_count], 0, SERIAL_ID_LEN, messages[SENSOR_ID], 0);// move the sensor_id
             report_event();                 // update the logs
-//            get_new_parameters();           // upload a new set of parameters if they are available
+            move_string(messages[REPORT_TIME], 0, 19, sensor_started[slot_count], 0);  // move this report time to saved start time
+            //            get_new_parameters();           // upload a new set of parameters if they are available
 //            if (new_parameters_loaded)
 //            {   sensor_status[slot_count] = NEW_PARAMETERS_FOUND;
 //                report_event();   // record the success of newly loaded parameters
@@ -2434,7 +2437,6 @@ void clear_record(void)
     if (rec_count)       // Check that there is a record to erase!
     {   rec_count--;     // Decrement the count of how many records have been collected since last upload
         for (z = 0; z < DATA_SIZE; z++) data.energy[rec_count][z] = 0;  // erase the record
-        rec_secs = 0;    // Reset the number of seconds that the current record has been active
     }
 }
 
@@ -2442,7 +2444,6 @@ void clear_record(void)
 void clear_all_records(void)
 {   rec_count = MAX_RECORDS;         // Make sure they are all errased
     while(rec_count) clear_record(); // clear them all until they are all empty
-    sec_count = 0;                   // The number of seconds since last upload
     clear_temp_bins();              // Erase these too.
 }
 
@@ -2491,12 +2492,12 @@ void phone_in(void)
   unsigned char more_records;
   unsigned char data_count;
     make_connection();               // wait for the phone to establish an internet connection
-    move_string(messages[REPORT_TIME], 0, 19, messages[START_TIME], 0);  // move old report time to start time
     set_time();                      // reads RTC from the phone and saves it in messages
     wait_a_sec(1);
     for (device_reporting = 2; device_reporting < interval_limit; device_reporting++)
     {   // might as well report all the devices when the first is ready.
         // they will all synch up together and report as frequently as the most frequent device.
+        move_string(sensor_started[device_reporting], 0, 19, messages[START_TIME], 0); // retreive the start time
         if (sensor_slot[device_reporting])      // only report if something is connected!
         {
             unit_talking_to = device_reporting; // set up communication with the correct device
@@ -2534,6 +2535,7 @@ void phone_in(void)
             }                                   // continue unitl there are no more to receive
             intervals_on = NO;                  // no timing interupts for now
             send_report();                      // generate a report
+            move_string(messages[REPORT_TIME], 0, 19, sensor_started[device_reporting], 0);  // move this report time to saved start time
  //           move_string(new_parameters, 0, PARAM_BYTES, parameters, 0); // save the current parameters to print out later
  //           get_new_parameters();      // upload a new set of paramters if they are available
  //           if (new_parameters_loaded)
@@ -2545,7 +2547,6 @@ void phone_in(void)
         }
     }
     phone_off();                    // turn the phone module off
-    sec_count = 0;                   // Reset the sec_count counter
 }
 
 
@@ -2832,27 +2833,10 @@ void integrate_data(void)
                 {
                     e_integrated[odr_count] = 0;            // clear the integrals
                 }
-                not_first_read = TRUE ;
+                not_first_read = TRUE ; // set the flag to skip this until the next integration
                 sample_offset = 0;      // reset the offset cycle (goes from 0 to 31)
                 e_sample_count = 0;     // restart the count
                 e_sample_limit = 0x0001 << e_sample_bits; // Calculate the number of samples to collect
-            // Save the first reading off the stack
-            // TODO // make this an average reading.
-                temp_value = acc_x;
-                data.energy[rec_count][X_POS_HI] = p[1];
-                data.energy[rec_count][X_POS_LO] = p[0];
-                temp_value = acc_y;
-                data.energy[rec_count][Y_POS_HI] = p[1];
-                data.energy[rec_count][Y_POS_LO] = p[0];
-                temp_value = acc_z;
-                data.energy[rec_count][Z_POS_HI] = p[1];
-                data.energy[rec_count][Z_POS_LO] = p[0];
-                temp_value = read_temperature(3); //average 8 temperature readings
-                data.energy[rec_count][TEMP_HI] = p[1];
-                data.energy[rec_count][TEMP_LO] = p[0];
-                temp_value = read_moisture();  // save the moisture reading
-                data.energy[rec_count][MOISTURE_HI] = p[1];
-                data.energy[rec_count][MOISTURE_LO] = p[0];
             }
             // save the reading for next time in ax_old, ay_old, and az_old
             ax_old[sample_offset] = acc_x;
@@ -2876,10 +2860,27 @@ void integrate_data(void)
                             integration_min[odr_count] = integration;
                     }
                 }
-                not_first_read = FALSE; // starting a new integration so we just store the first reading
+                not_first_read = FALSE; // flag that we are starting a new integration
             }
             if (rec_secs >= sec_max)      // Check for the end of a record
             {
+                // Save the last reading out of the ADXL
+                // TODO // make this an average reading.
+                temp_value = acc_x;
+                data.energy[rec_count][X_POS_HI] = p[1];
+                data.energy[rec_count][X_POS_LO] = p[0];
+                temp_value = acc_y;
+                data.energy[rec_count][Y_POS_HI] = p[1];
+                data.energy[rec_count][Y_POS_LO] = p[0];
+                temp_value = acc_z;
+                data.energy[rec_count][Z_POS_HI] = p[1];
+                data.energy[rec_count][Z_POS_LO] = p[0];
+                temp_value = read_temperature(3); //average 8 temperature readings
+                data.energy[rec_count][TEMP_HI] = p[1];
+                data.energy[rec_count][TEMP_LO] = p[0];
+                temp_value = read_moisture();  // save the moisture reading
+                data.energy[rec_count][MOISTURE_HI] = p[1];
+                data.energy[rec_count][MOISTURE_LO] = p[0];
                 offset = FIRST_ODR; // start out pointing to the correct data element
                 for (odr_count = 0; odr_count < 6; odr_count ++)    // start with the highest ODR and work our way down
                 {                       // store the data for the record
@@ -3543,31 +3544,29 @@ unsigned char get_registered(void)
 
 unsigned char register_device(void)
 {  unsigned char slot_count;    // a counter to find an unused slot
-    if (tx_rx_checked(EMPTY_TIME_SLOT, REQUEST_TIME_SLOT))  // let the devices know a slot is available
-    {   if (tx_rx_checked(SEND_ID, IDENTIFICATION))      // if a device wants the slot, ask sensor to send the sensor_ID
-        {                          //make sure the data isn't too big for the array
+    for (slot_count = 2; ((slot_count < SENSOR_SLOTS) && (sensor_slot[slot_count] > 0)); slot_count++); // check all the slots
+    if ( (slot_count < SENSOR_SLOTS)              // if there are no available slots, don't do anything
+        && (tx_rx_checked(EMPTY_TIME_SLOT, REQUEST_TIME_SLOT)) ) // let the devices know a slot is available
+    {   if (tx_rx_checked(SEND_ID, IDENTIFICATION))              // if a device wants the slot, ask sensor to send the sensor_ID
+        {               //make sure the data isn't too big for the array
             if (received_datalength > NEST_ID_BYTES) received_datalength = NEST_ID_BYTES;
-                                   // find the first empty slot
-            for (slot_count = 2; ((slot_count < SENSOR_SLOTS) && (sensor_slot[slot_count] > 0)); slot_count++);
-            if (slot_count >= SENSOR_SLOTS) slot_count = 0;   // if there are no available slots, return a zero
-            // TODO // it would be possible here to check and see if this sensor were recently connected
-            else                       // save the serial number (last sensor rejected gets stored in slot zero)
+            else        // save the serial number.  Slot_count will be the first empty slot
             {   move_string(coax_buffer, 0, received_datalength, sensor_ids[slot_count], 0);
                 if  (coax_long_message(REGISTRATION, slot_count, 0, " ", 1 )) // if the sensor received the info
-                {   unit_talking_to = slot_count;
-                    if (rx_checked(REGISTERED))
+                {   unit_talking_to = slot_count;       // try talking directly to the new unit
+                    if (rx_checked(REGISTERED))         // check for success
                     {   sensor_slot[slot_count] = YES;  // the success of registration is stored
-                        sensor_status[slot_count] = RECENTLY_CONNECTED;  //This is used for census reporting
-                        device_count++;   // increment the number of devices
-                        return(YES);
+                        sensor_status[slot_count] = RECENTLY_CONNECTED; //This is used for census reporting
+                        device_count++;                                 // increment the number of devices
+                        return(YES);                                    // registration was successful
                     }
                     else sensor_slot[slot_count] = NO;   // the failure of registration is stored and returned
                 }
             }
         }
-        return (NO);
+        return (NO);    // something went wrong so the error is not cleared
     }
-    tx_error = NO;              // an error means that nobody tried to register
+    tx_error = NO;      // an timeout error means that nobody tried to register so the error is cleared
     return (NO);
 }
 
@@ -3900,141 +3899,14 @@ void common_startup(void)
 }
 
 
-/////////////////  slave() -- the main routine for SLAVE devices ////////////////////////////////
-// receives commands from  the master and collects, processes and transmits data
-//
-void slave()
-{ unsigned char temp = 0;
-    slave_settings();               // Settings without using GRACE
-    common_startup();               // Configuration settings common to both MASTER and SLAVE
-    STOP_INTERVAL_TIMER;            // stop the timer for now
-    wait(512);                      // wait 1/2 a second
-    generate_random(12);            // creates a random number between 0 and 8191
-//    if (!not_first_start) initialize_slave();
-    initialize_slave();             // this may need to be condtional
-    slave_registered = NO;          // flag that slave is not registered
-    suspended = NO;                 // start out in not suspended mode -- master decides when to suspend
-    this_unit = DEFAULT_SLAVE;      // start out unregistered
-    set_new_parameters();           // computes the length of a record
-    synch_slave();                  // first get in synch ith what is happening
-    adxl_fifo_read();               // empty the ADXL buffer before we begin
-    while (TRUE)                    // just loop
-    {   coax_reset();               // clear out any junk
-        intervals_on = YES;         // The slave always keeps time.
-        ENTER_LOW_POWER_MODE_3;     // wait until the next interval begins
-// There are two modes, suspended mode (suspended = YES) and not suspended mode (suspended = NO)
-// Suspended mode is for when the cell phone board is on and reporting data
-        if (suspended)                  // hopefully we won't go out of synch in a few minutes
-        {
-            if (interval_count == 1)  // listen for messages during interval one, but don't disconnect if there aren't any
-            {
-                if (receive_message())      // any messages now are about sending data
-                {
-                    if (received_command == SEND_DATA)
-                    {
-                        record_number = 0;   // start with the first record
-                        reporting_data = send_records();     // set up data reporting and sends a block of data
-
-                    }                                        // TRUE = Still reporting, FALSE  = Done
-                    else if (received_command == WAKE_UP)    // WAKE_UP is the command to end suspended mode
-                    {
-                        suspended = NO;
-                    }
-                }
-            }
-            else if ( (reporting_data)                // the data gets sent in chunks during each interval
-                && (receive_message())              // any messages now are about sending data
-                && (received_command == SEND_DATA) )
-                reporting_data = send_records();    // The flag is reset when the last record is set.
-        }
-// If not suspended mode, the units handshake their status during their assigned slot
-// interval zero is always just for resynching
-        else switch (interval_count)
-        {
-            case 0:
-                if ( receive_message()
-                    && (received_command == SYNCH)                 // if no error receiving
-                    && (received_command_bank == CORE_COMMAND_BANK) )
-                    // and the command is to synch all devices,
-                {
-                    synch_event_clock();                // if so, synchronize our watches
-                }
-                else
-                {
-                    slave_registered = NO;              // otherwise give up and re-register
-                    this_unit = DEFAULT_SLAVE;          // release the slot
-                    synch_slave();                      // and get in synch with what is happening
-                }
-                break;
-// interval one is for adjusting the clock, registering the sensor and housekeeping
-// Also controls when to report data and suspend handshaking
-            case 1:           // adjust the interval timer back to a full 125 msec
-                STOP_INTERVAL_TIMER;    // stop the timer while adjusting
-                ZERO_TIMER;             // Start the timer counter at zero again
-                NORMAL_INTERVAL;        // reset to normal interval length after a synch interval
-                START_INTERVAL_TIMER;   // start or restart the timer counter
-                watchdog_reset();       // this slot can be used for other housekeeping
-                interval_count = 1;     // was there an interrupt generated by resetting the clock?
-                // This is also be the interval for registerring
-                if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
-                {
-                    if ( (receive_message())          // and there's no error receiving the message
-                        && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
-                    {
-                        if (get_registered())           // register the sensor and assign it an interval
-                        {
-                            status = READY;             // if the interval is non-zero we are connected and ready
-                            slave_registered = YES;
-                        }
-                    }
-                }
-                // and for going in and out of suspend mode during data reporting
-                else if ( (receive_message())       // only if registered.
-                    && (received_command == SUSPEND) )
-                {
-                    suspended = YES;            // go into suspend mode if commanded
-                    wait_for_last_cycle();      // wait until the last interval
-                }
-                break;
-
-            default:
-                // This only happens during the registered interval if not suspended
-                if (interval_count == this_unit)
-                {
-                    if (receive_message())                      // receive a message and there was no error
-                        slave_routines();
-                    else
-                    {
-                        slave_registered = NO;      // otherwise give up and re-register
-                        this_unit = DEFAULT_SLAVE;  // un registered units are all 0xFF
-                        synch_slave();              // and get in synch with what is happening
-                    }
-                }
-                break;
-        }
-        // This is where everything should happen after synchs and handshakes, like data readings
-        // Data is continuously read, even when old data is being sent over the COAX line
-        if ( !(interval_count & 0x07) )    // every second
-        {
-            sec_count++;             // seconds since last data upload
-            rec_secs++;              // seconds this record has been counting
-        }
-        if (adxl_reading_on)
-            adxl_fifo_read();    //This reads the buffer of the ADXL fifo buffer
-        if (integrating_on)
-            integrate_data();   // for now just use the integration algorithm
-        if (bin_process_on)
-            process_bin_data();
-    }
-}
 
 
 /////////////////  master() -- the main routine for MASTER devices ////////////////////////////////
 // sends commands to the smart sensor and controls reporting via
 // Janus Plug-in terminus boards
-void master()
+void master(void)
 { unsigned char wait_to_register_count=0;
-    master_settings();                  // I/O settings for master board
+    master_settings();              // I/O settings for master board
     common_startup();               // Configuration settings common to both MASTER and SLAVE
     COAX_POWER_DISABLE;             // Turn off power to the sensors.  This is to insure that they didn't
                                     // end up in an unstable state during power up or brown out.
@@ -4143,24 +4015,34 @@ void master()
         else if (device_count)          // For all intervals greater than one, if devices are connectd
         {                               // this is the default for all connected sensors.  It checks that they are still connected
                                         // and deregisters them if they do not respond to a status inquiry
-            if (sensor_slot[interval_count] == YES)  // only check on an slot if a slave has been registered there (= 1)
+            if (sensor_slot[interval_count] == YES)     // only check on an slot if a slave has been registered there (= 1)
             {
-                unit_talking_to = interval_count;    // set the recipient to match the interval
-                if (tx_rx(STATUS))                  // If we are successful sending a status message and receiving a reply
+                unit_talking_to = interval_count;       // set the recipient to match the interval
+                if (tx_rx(STATUS))                      // If we are successful sending a status message and receiving a reply
                 {
-                    GREEN_LED_OFF;                  // The Green LED will blink once when a sensor is connected and registerred
-                    if (master_routines())          // decide what to do about the sensor's status
+                    GREEN_LED_OFF;                      // The Green LED will blink once when a sensor is connected and registerred
+                    ping_failures[unit_talking_to] = 0; // reset the failure count since everything is good
+                    if (master_routines())              // decide what to do about the sensor's status
                         coax_short_message(SIGN_OFF);   // All is good, send a SIGN_OUT message
                 }
-                if (tx_error == TIMEOUT_ERROR)      // a TIMEOUT here means that nothing has responded
-                {
-                    sensor_slot[unit_talking_to]= NO; // deregisiter whatever sensor was there
-                    sensor_status[unit_talking_to]= RECENTLY_DISCONNECTED; // record the status
-                    device_count--;                 // one less device
-                    tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
-                    RED_LED_ON;                     // long red led blink indicates disconnection
-                    changed_device_count ++;        // Keep a count of how many devices have been changed
-                    wait_to_register_count = 0;     // reset the counter to wait a while before reporting in the new census
+                if (tx_error == TIMEOUT_ERROR)          // a TIMEOUT here means that nothing has responded
+                {   if (++ping_failures[unit_talking_to] >= PING_FAILURES_MAX)
+                    {   // disconnect if the handshake fails PING_FAILURE_MAX times
+                        sensor_slot[unit_talking_to]= NO; // deregisiter whatever sensor was there
+                        if (sensor_status[unit_talking_to] == NO_UNREPORTED_CHANGE) // ignore quick connects and disconnects
+                        {
+                            sensor_status[unit_talking_to] = RECENTLY_DISCONNECTED; // record the status
+                            changed_device_count ++;        // Keep a count of how many devices have been changed
+                        }
+                        else if (sensor_status[unit_talking_to] == RECENTLY_CONNECTED)
+                        {
+                            sensor_status[unit_talking_to] = NO_UNREPORTED_CHANGE; // record the status
+                        }
+                        device_count--;                 // one less device
+                        tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
+                        RED_LED_ON;                     // long red led blink indicates disconnection
+                        wait_to_register_count = 0;     // reset the counter to wait a while before reporting in the new census
+                    }
                  }
             }
             else tx_error = NO_ERROR;
@@ -4173,17 +4055,149 @@ void master()
 
 
 /////////////////////////////////////////////////////////////////////////////////
-/////////////////////////// MAIN ROUTINE ////////////////////////////////////////
+////////////////// MAIN ROUTINE  (includes routines for SLAVE) //////////////////
 /////////////////////////////////////////////////////////////////////////////////
 
 void main(void)
-{
-    Grace_init();       // Activate Grace-generated configuration (default settings for the MASTER)
+{ unsigned char temp = 0;
+    Grace_init();       // Activate Grace-generated configuration
 //    cs_setup();
     if (not_slave)
-       master() ;       // The routine for the master
-    else slave();       // The routine for the SLAVE
-    while (TRUE);       // Never gets here, but if it did, a WD reset would eventually restart things
+        master() ;       // The routine for the master
+
+    /////////////////  the main routine for SLAVE devices ////////////////////////////////
+    // receives commands from  the master and collects, processes and transmits data
+    else
+    {
+        slave_settings();               // Settings without using GRACE
+        common_startup();               // Configuration settings common to both MASTER and SLAVE
+        STOP_INTERVAL_TIMER;            // stop the timer for now
+        wait(512);                      // wait 1/2 a second
+        generate_random(12);            // creates a random number between 0 and 8191
+    //    if (!not_first_start) initialize_slave();
+        initialize_slave();             // this may need to be condtional
+        slave_registered = NO;          // flag that slave is not registered
+        suspended = NO;                 // start out in not suspended mode -- master decides when to suspend
+        this_unit = DEFAULT_SLAVE;      // start out unregistered
+        set_new_parameters();           // computes the length of a record
+        synch_slave();                  // first get in synch ith what is happening
+        adxl_fifo_read();               // empty the ADXL buffer before we begin
+        while (TRUE)                    // just loop
+        {   coax_reset();               // clear out any junk
+            intervals_on = YES;         // The slave always keeps time.
+            ENTER_LOW_POWER_MODE_3;     // wait until the next interval begins
+    // There are two modes, suspended mode (suspended = YES) and not suspended mode (suspended = NO)
+    // Suspended mode is for when the cell phone board is on and reporting data
+            if (suspended)                      // hopefully we won't go out of synch in a few minutes
+            {
+                if (interval_count == 1)        // listen for messages during interval one, but don't disconnect if there aren't any
+                {
+                    if (receive_message())      // any messages now are about sending data
+                    {
+                        if (received_command == SEND_DATA)
+                        {
+                            record_number = 0;  // start with the first record
+                            reporting_data = send_records();     // set up data reporting and sends a block of data
+
+                        }                                        // TRUE = Still reporting, FALSE  = Done
+                        else if ((received_command == WAKE_UP)   // WAKE_UP is the command to end suspended mode
+                            || (received_command == EMPTY_TIME_SLOT))   //if it is missed, we might see an empty time slot command
+                            // TODO // There probably should be a handshake of some sort if there are not empty time slots.
+                                    // This may be needed if the WAKE_UP command is missed for some unknown reason.
+                        {
+                            suspended = NO;
+                        }
+                    }
+                }
+                else if ( (reporting_data)                // the data gets sent in chunks during each interval
+                    && (receive_message())              // any messages now are about sending data
+                    && (received_command == SEND_DATA) )
+                    reporting_data = send_records();    // The flag is reset when the last record is set.
+            }
+    // If not suspended mode, the units handshake their status during their assigned slot
+    // interval zero is always just for resynching
+            else switch (interval_count)
+            {
+                case 0:
+                    if ( receive_message()
+                        && (received_command == SYNCH)                 // if no error receiving
+                        && (received_command_bank == CORE_COMMAND_BANK) )
+                        // and the command is to synch all devices,
+                    {
+                        synch_event_clock();                // if so, synchronize our watches
+                    }
+                    else
+                    {
+                        slave_registered = NO;              // otherwise give up and re-register
+                        this_unit = DEFAULT_SLAVE;          // release the slot
+                        synch_slave();                      // and get in synch with what is happening
+                    }
+                    break;
+    // interval one is for adjusting the clock, registering the sensor and housekeeping
+    // Also controls when to report data and suspend handshaking
+                case 1:           // adjust the interval timer back to a full 125 msec
+                    STOP_INTERVAL_TIMER;    // stop the timer while adjusting
+                    ZERO_TIMER;             // Start the timer counter at zero again
+                    NORMAL_INTERVAL;        // reset to normal interval length after a synch interval
+                    START_INTERVAL_TIMER;   // start or restart the timer counter
+                    watchdog_reset();       // this slot can be used for other housekeeping
+                    interval_count = 1;     // was there an interrupt generated by resetting the clock?
+                    // This is also be the interval for registerring
+                    if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
+                    {
+                        if ( (receive_message())          // and there's no error receiving the message
+                            && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
+                        {
+                            if (get_registered())           // register the sensor and assign it an interval
+                            {
+                                status = READY;             // if the interval is non-zero we are connected and ready
+                                slave_registered = YES;
+                            }
+                        }
+                    }
+                    // and for going in and out of suspend mode during data reporting
+                    else if ( (receive_message())       // only if registered.
+                        && (received_command == SUSPEND) )
+                    {
+                        suspended = YES;            // go into suspend mode if commanded
+                        wait_for_last_cycle();      // wait until the last interval
+                    }
+                    break;
+
+                default:
+                    // This only happens during the registered interval if not suspended
+                    if (interval_count == this_unit)
+                    {
+                        if (receive_message())              // receive a message and there was no error
+                        {
+                            slave_routines();               // process the message
+                            ping_failures[0] = 0;           // reset the failure counter, all is good
+                        }
+                        else
+                        {   if (++ping_failures[0] >= PING_FAILURES_MAX)
+                            {   // disconnect if the handshake fails PING_FAILURE_MAX times
+                                slave_registered = NO;      // otherwise give up and re-register
+                                this_unit = DEFAULT_SLAVE;  // un registered units are all 0xFF
+                                synch_slave();              // and get in synch with what is happening
+                            }
+                        }
+                    }
+                    break;
+            }
+            // This is where everything should happen after synchs and handshakes, like data readings
+            // Data is continuously read, even when old data is being sent over the COAX line
+            if ( !(interval_count & 0x07) )    // every second
+            {
+                rec_secs++;              // seconds this record has been counting
+            }
+            if (adxl_reading_on)
+                adxl_fifo_read();    //This reads the buffer of the ADXL fifo buffer
+            if (integrating_on)
+                integrate_data();   // for now just use the integration algorithm
+            if (bin_process_on)
+                process_bin_data();
+        }
+    }
 }
 
 unsigned const char copyleft[] = "TurtleSense Phase III -- CC 4.0 BY-SA NerdsWithoutBorders.net";
