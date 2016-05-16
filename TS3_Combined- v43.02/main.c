@@ -15,11 +15,11 @@
 #include <driverlib/MSP430FR5xx_6xx/inc/hw_memmap.h>
 #include <driverlib/MSP430FR5xx_6xx\timer_a.h>
 #include <driverlib/MSP430FR5xx_6xx\timer_b.h>
-
+#include <driverlib/MSP430FR5xx_6xx/adc12_b.h>
 
 #define MASTER 0
 #define SLAVE  1
-#define THIS_UNIT MASTER
+#define THIS_UNIT SLAVE
 
 /*
        /////////////////////////////////////////////////////////////////////////////////////////////
@@ -63,7 +63,6 @@
 #define FTP_ACCOUNT   "AT#FTPOPEN=\"yourwebsite.org\",\"ftp-username\",\"ftp-pasword\"\r" // AT messages to create FTP connection UPDATE WITH YOUR CREDENTIALS
 #define ISP_PROVIDER "AT+CGDCONT=1,\"IP\",\"ISP-Provider.net\"\r" // AT message to open internet connection UPDATE WITH YOUR CREDENTIALS
 
-
 #define USER_PASSWORD "ABCDEFGH"  // 8 character password needed for program or parameter downloads.  Recompile with a different password.
 
 
@@ -72,12 +71,12 @@
 
 // The following is only necessary for compiling a SMART SENSOR slave
        // SMART SENSOR IDENTIFICATION
-#define NEST_ID "123456.000,060914,M-AA0001"
+#define NEST_ID "123456.000,060914,S-AA0001"
        // The last 6 digits is a unique serial number for each smart sensor.
        // Update the last 6 digits before compiling for each new device.
        // The rest of the data will be updated during each new registration with a master
        // What you see here is just an example of what it could look like
-#define SERIAL_NUMBER "M-AA0001"   // Unique serial number for each device.  Update before compiling for a new device
+#define SERIAL_NUMBER "S-AA0001"   // Unique serial number for each device.  Update before compiling for a new device
 #define SERIAL_ID_LEN   8          // length of serial number string (don't change without changing all the places this is used)
        // PHASE THREE SERIAL NUMBER TEMPLATES
        // M-AA####  -- Master device
@@ -233,9 +232,6 @@
 #define GREEN_LED_OFF   P4OUT &= ~BIT0
 
         // Battery definitions (MASTER)
-#define SHUT_DOWN_LEVEL     3   //Turn off the units at 3% of battery capacity.  The batteries should never get to zero.
-#define START_UP_LEVEL      5   //This level should be more than enough to make two phone calls,
-                                // a call to say the unit is running, and a later call when the batteries drop
 #define CHECK_BATTERY_ON  P4OUT |= BIT4     // Turns on the battery test circuit (draws a small current)
 #define CHECK_BATTERY_OFF P4OUT &= ~BIT4    // Turns off the battery test circuit to save power
 
@@ -644,20 +640,20 @@
 #define SLOW_DAYS           40  // Number of days that should elapse until there is more frequent reporting
 #define INTERVALS           48  // the total number of 1/8 second intervals (6 seconds total)
 #define REGISTRATION_WAIT    5  // Number of (6 second) loops to wait before reporting status changes of connected devices
-#define RECSEC            240    // The default is 1800 or 30 minutes // Number of seconds in each bin record.  Must be factor of 3600
-#define SLOW_RECSEC       240    // The default is 3600 or 1 hour // Number of seconds in each bin record on a slow day
+#define RECSEC            1800    // The default is 1800 or 30 minutes // Number of seconds in each bin record.  Must be factor of 3600
+#define SLOW_RECSEC       1800    // The default is 3600 or 1 hour // Number of seconds in each bin record on a slow day
 
 
     // These can be changed, but the program may need to be adjusted (change with caution)
 #define MAX_BIN             10  // number of histogram bins kept in each record (changing this might cause problems -- check thoroughly)
 #define DATA_SIZE           16  // This is MAX_BIN plus other parameters (currently 6: Temp, X, Y, Z, Count, Max)
 #define DATA_BYTES          32  // The number of bytes in one record (DATA_SIZE * 2)
-#define MAX_RECORDS         16  // The default is 244 (240 pluss 4 extra) Add 4 to the desired number
+#define MAX_RECORDS          12  // The default is 244 (240 pluss 4 extra) Add 4 to the desired number
 #define RECORD_BUNCH         6  // The number of records sent at at time (every 1/8 second interval)
 
 #define FRACTIONAL_BITS      4  // The number of bits for each ODR that is the fractional part of the number.
                                 // For example if the reported amount is 0xA34E, set at 4 the fractional portion is "E" = 0x000E/0x0010
-#define SAMPLES_POWER_OF_2         12  // The power of two for the number of samples to integrate
+#define SAMPLES_POWER_OF_2   15 // The power of two for the number of samples to integrate
                                 // also used to bitshift the result to divide for an average reading
 
 
@@ -760,13 +756,47 @@
     ////// Data  recording and reporting
     volatile unsigned int  last_temperature;        // the last temperature reading
     volatile unsigned int  day_of_year;             // the number of days elapsed so far this year
-    volatile unsigned char battery_type = 0;        // brand of battery for different discharge curves in battery_levels //TODO//
+    volatile unsigned char battery_type = 1;        // brand of battery for different discharge curves in battery_levels
+                    // 6 types -- 0=Eneloop, 1=Corun, 2-5 empty, available for future data
     volatile unsigned int battery_level = 17;       // 0 = battery dead, 34 = fully charged (until written, set at 50%)
-    const char battery_percents[]= { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
-                                    0x10, 0x12, 0x15, 0x20, 0x25, 0x30, 0x40, 0x50, 0x60, 0x70,
-                                    0x75, 0x80, 0x85, 0x88, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
-                                    0x96, 0x97, 0x98, 0x99, 0x00};  // values from 1 to 99 can be output without having to convert from hex
-    const int battery_levels[] =  {650,670,675};    //TODO// to be created with battery levels that correspond to the percents
+#define MINIMUM_PHONE_POWER_LEVEL  0x4A00          // the minimum reading to turn on the phone
+#define START_UP_LEVEL             0x4000          // the minimum to start up the sensors
+    const char battery_percents[34]= {   0x00,   0x01,   0x02,   0x03,   0x04,   0x05,   0x06,   0x07,   0x08,
+                                         0x09,   0x10,   0x12,   0x15,   0x20,   0x25,   0x30,   0x40,   0x50,   0x60,
+                                         0x70,   0x75,   0x80,   0x85,   0x88,   0x90,   0x91,   0x92,   0x93,   0x94,
+                                         0x95,   0x96,   0x97,   0x98,   0x99};  // values from 1 to 99 can be output without having to convert from hex
+    const int battery_levels[6][34] ={  {0x0890, 0x08D0, 0x08F1, 0x090F, 0x0928, 0x093D, 0x094F, 0x0960, 0x096E,    //Eneloop battery
+                                         0x097B, 0x0992, 0x09A5, 0x09C9, 0x09E5, 0x09F3, 0x0A0C, 0x0A1D, 0x0A2A, 0x0A36,
+                                         0x0A3E, 0x0A4B, 0x0A60, 0x0A76, 0x0A89, 0x0A94, 0x0AA0, 0x0AAE, 0x0ABC, 0x0ACC,
+                                         0x0ADB, 0x0AED, 0x0AFF, 0x0B13, 0x0B20},
+                                        {0x0929, 0x093F, 0x094F, 0x095D, 0x0969, 0x0975, 0x0981, 0x098B, 0x0995,    // Corun battery
+                                         0x099E, 0x09B0, 0x09C9, 0x09E8, 0x09FE, 0x0A11, 0x0A28, 0x0A35, 0x0A3C, 0x0A41,
+                                         0x0A43, 0x0A49, 0x0A5A, 0x0A6C, 0x0A7C, 0x0A86, 0x0A91, 0x0A9C, 0x0AA8, 0x0AB7,
+                                         0x0AC7, 0x0ADA, 0x0AF0, 0x0B09, 0x0B20},
+                                        {0x0929, 0x093F, 0x094F, 0x095D, 0x0969, 0x0975, 0x0981, 0x098B, 0x0995,
+                                         0x099E, 0x09B0, 0x09C9, 0x09E8, 0x09FE, 0x0A11, 0x0A28, 0x0A35, 0x0A3C, 0x0A41,
+                                         0x0A43, 0x0A49, 0x0A5A, 0x0A6C, 0x0A7C, 0x0A86, 0x0A91, 0x0A9C, 0x0AA8, 0x0AB7,
+                                         0x0AC7, 0x0ADA, 0x0AF0, 0x0B09, 0x0B20},
+                                        {0x0929, 0x093F, 0x094F, 0x095D, 0x0969, 0x0975, 0x0981, 0x098B, 0x0995,
+                                         0x099E, 0x09B0, 0x09C9, 0x09E8, 0x09FE, 0x0A11, 0x0A28, 0x0A35, 0x0A3C, 0x0A41,
+                                         0x0A43, 0x0A49, 0x0A5A, 0x0A6C, 0x0A7C, 0x0A86, 0x0A91, 0x0A9C, 0x0AA8, 0x0AB7,
+                                         0x0AC7, 0x0ADA, 0x0AF0, 0x0B09, 0x0B20},
+                                        {0x0929, 0x093F, 0x094F, 0x095D, 0x0969, 0x0975, 0x0981, 0x098B, 0x0995,
+                                         0x099E, 0x09B0, 0x09C9, 0x09E8, 0x09FE, 0x0A11, 0x0A28, 0x0A35, 0x0A3C, 0x0A41,
+                                         0x0A43, 0x0A49, 0x0A5A, 0x0A6C, 0x0A7C, 0x0A86, 0x0A91, 0x0A9C, 0x0AA8, 0x0AB7,
+                                         0x0AC7, 0x0ADA, 0x0AF0, 0x0B09, 0x0B20},
+                                        {0x0929, 0x093F, 0x094F, 0x095D, 0x0969, 0x0975, 0x0981, 0x098B, 0x0995,
+                                         0x099E, 0x09B0, 0x09C9, 0x09E8, 0x09FE, 0x0A11, 0x0A28, 0x0A35, 0x0A3C, 0x0A41,
+                                         0x0A43, 0x0A49, 0x0A5A, 0x0A6C, 0x0A7C, 0x0A86, 0x0A91, 0x0A9C, 0x0AA8, 0x0AB7,
+                                         0x0AC7, 0x0ADA, 0x0AF0, 0x0B09, 0x0B20}
+                                    };
+    const int adc_volts[4][9] ={  { 0x1555, 0x2AAA, 0x4000, 0x5555, 0x6AAA, 0x8000, 0x9555, 0xAAAA, 0xC000},
+                                  { 0x0222, 0x0444, 0x0666, 0x0888, 0x0AAA, 0x0CCC, 0x0EEE, 0x1111, 0x1333},
+                                  { 0x0036, 0x006D, 0x00A3, 0x00DA, 0x0111, 0x0147, 0x017E, 0x01B4, 0x01EB},
+                                  { 0x0002, 0x0008, 0x000D, 0x0013, 0x0018, 0x001E, 0x0023, 0x0028, 0x002E}
+                                } ;
+
+
             // battery_level needs to be set by comparing the ADC reading of the battery level to the battery_levels[] array.
     volatile unsigned int rec_count;                // The count of how many records have been collected since last upload
     volatile unsigned int recs_reported;            // The total of how many records have been received for reporting
@@ -1098,7 +1128,9 @@ unsigned char new_parameters[40]= {
             "Battery type 5  ",         // messages[88]
             "DISCHARGED",               // messages[89]
             "Maximum charge",           // messages[90]
-            " percent charged"          // messages[91]
+            " percent charged",         // messages[91]
+            "\rBattery voltage: ",      // messages[92]
+            "0.000"                     // messages[93]
             };
 
 
@@ -1196,6 +1228,8 @@ unsigned char new_parameters[40]= {
 #define TXT_DISCHARGED      89  //  "DISCHARGED"
 #define TXT_MAX_CHARGE      90  //  "Maximum charge"
 #define TXT_PERCENT         91  //  " percent charged"
+#define TXT_VOLTAGE         92  //  "\rBattery voltage: "
+#define ADC_VOLTAGE         93  //   "0.000"
 
      //      CREG codes
 #define CELL_NOT_REGISTERED 0       //      0 - not registered, ME is not currently searching a new operator to
@@ -2042,6 +2076,26 @@ void make_connection(void)
     }                                   // TODO // error handling!
 }
 
+// convert an ADC reading to an ascii string
+void adc2ascii(unsigned int number, unsigned char *char_string, unsigned char offset) // string_length will be 5 chars
+{   unsigned char test_chars[4] = "0000";           // an easier to reference array to create the result
+    unsigned char test, decimal_count;              // keep track of the decimal place
+    for (decimal_count = 0; decimal_count<4; decimal_count++)  // work from left to right
+    {   // find the highest value in the table that is not more than the number
+        // the value in any position x is actually the number for position x+1
+        // so, for example if the first test that is greater than the number is in position 5,
+        // that means that 5 was the highest digit that would not go over.
+        for ( test = 0; ( (test <9) && (number > adc_volts[decimal_count][test]) ); test++ );
+        if (test) //the default is zero, so we only have to change the result if it is non-zero
+        {
+            test_chars[decimal_count] = 0x30 + test;    // add the result to the ascii value of "0"
+            number -= adc_volts[decimal_count][test-1]; // continue to the next digit with the remainder
+        }
+    }                                 // do this for all the digits
+    move_string(test_chars, 0, 1, char_string, offset);   // move the integer portion string back to substring specified;
+    move_string(test_chars, 1, 3, char_string, offset+2); // move the rest of the result after the decimal place
+}
+
 
     // convert an integer to an ascii string
 void int2ascii(unsigned int number, unsigned char *char_string, unsigned char offset, unsigned char string_length) // string_length can be 1, 2, 3 or 4
@@ -2242,6 +2296,8 @@ void send_report(void)
         send_integer(recs_reported);        // the rec_count
         send_message(TXT_BATTERY_TYPE);     // the heading for the battery type
         send_message(BATTERY_TYPE_0 + battery_type);    // the battery type
+        send_message(TXT_VOLTAGE);          // the battery voltage (to 3 decimal places!)
+        send_message(ADC_VOLTAGE);          // TEMPORARY FOR NOW
         send_message(TXT_BATTERY_LEVEL);    // battery level heading
         if (battery_level)
         {
@@ -2345,38 +2401,73 @@ void send_census(void)
    watchdog_reset();               // reset the watchdog timer
 }
 
-unsigned char read_battery()
-{   CHECK_BATTERY_ON;               // turn on the battery voltage circuit
+unsigned int read_battery(void)
+{ unsigned int adc_average;
+  unsigned int adc_result = 0;
+  unsigned char x;
+//    return (0x99);
+    CHECK_BATTERY_ON;               // turn on the battery voltage circuit
     // read the battery and return a value from 0 to 100
     // 0 = 3.0 volts, which is the minimum acceptable battery voltage
     // 100 = 4.2 volts, which is the maximum voltage of charged batteries
     // This number should be roughly proportional to percentage of battery capacity
+    REFCTL0 |= REFON;           // Turn on 2.0V internal reference
+    /* Enable memory buffer 0 interrupt */
+    ADC12_B_enableInterrupt(ADC12_B_BASE, ADC12_B_IE0, 0, 0);
+//    wait(10);                 // Let ref voltage stabilize for 10 mSec
+
+     ADC12CTL0 &= ~ADC12ENC ;    // ADC12_B disabled
+     ADC12CTL0 |= ADC12ON ;      // ADC12_B module turned on
+     ADC12CTL1 &= ~(ADC12SHS0 | ADC12SHS1 | ADC12SHS2) ;     // Trigger on ADC12SC
+    //Enable and Start the conversion in Single-Channel, Single Conversion Mode
+    for(x = 16; x; x--)
+    {           // we'll take sixteen readings and average them
+         ADC12CTL0 |= (ADC12ENC | ADC12SC) ;    // Enable ADC12_B and start sample and conversion/*
+         ENTER_LOW_POWER_MODE_1;
+         adc_result += ADC12MEM0;               // add the 12 bit result into the total
+    }
+    ADC12CTL0 &= ~ADC12ON ;     // ADC10_B module turned off
+    REFCTL0 &= ~REFON;          // Turn off 2.0V reference
+    adc_result >>= 1 ;          // Make it into a 15 bit number  -- divide by 2 for the ADC2ASCII conversion
+    adc_average = adc_result>>3;// Use a 12 bit average for the volatage lookup
+    for ( battery_level = 0;
+          ( (battery_level <34) && (adc_average > battery_levels[battery_type][battery_level]) );
+          battery_level++) ;    // find the level in the table
     CHECK_BATTERY_OFF;
-    return(START_UP_LEVEL+2);      // until the routine is written, make it above the minimum
+    ADC12_B_disable(ADC12_B_BASE);     // Disable the ADC12_B module
+    return (adc_result);
 }
 
 
-void phone_on(void)
-{       // Prepare to turn on the phone
+unsigned char phone_on(void)
+{ unsigned int battery_reading;
+    // Prepare to turn on the phone
     PHONE_RESET_HIZ;                // Set phone reset bit high  to set the phone pins to hi-z
     PHONE_ON_OFF_HIZ;               // Set on/off bit high to set the phone pins to hi-z
-    PHONE_POWER_ENABLE;             // Turn on the phone power
-    wait(20);                       // wait for 20 milliseconds for the 5V power supply to power up
-    // then make sure the phone is off, but the power supply is on
-    while (PHONE_IS_ON)             // check if the power monitor pin is high
-    {   PHONE_POWER_DISABLE;            // while it is, turn off the phone board power supply
-        while (PHONE_IS_ON) wait(8);    // loop until the power monitor pin is low.  Pause a millisecond before checking again
-        PHONE_POWER_ENABLE;             // Turn on the phone power
-        wait(20);                       // wait for 20 milliseconds for the capacitor to charge up
+    battery_reading = read_battery();
+    adc2ascii(battery_reading, messages[ADC_VOLTAGE], 0); // read the battery before turning on the phone power
+    if (battery_reading > MINIMUM_PHONE_POWER_LEVEL) // Check the voltage before turning on the phone
+    {   // if there's enough juice actually turn on the phone
+        PHONE_POWER_ENABLE;             // Turn on the phone 5V power supply
+        wait(20);                       // wait for 20 milliseconds for the 5V power supply to power up
+        // then make sure the phone is off, but the power supply is on
+        while (PHONE_IS_ON)             // check if the power monitor pin is high
+        {
+            PHONE_POWER_DISABLE;            // while it is, turn off the phone board power supply
+            while (PHONE_IS_ON) wait(8);    // loop until the power monitor pin is low.  Pause 8 milliseconds before checking again
+            PHONE_POWER_ENABLE;             // Turn on the phone power
+            wait(20);                       // wait for 20 milliseconds for the capacitor to charge up
+        }
+        while (PHONE_IS_OFF)            // While the power monitor indicator bit is off
+        {
+            PHONE_ON_OFF_REQUEST;       // switch the phone power on/off by driving the pin low by setting P3.5 low
+            wait_a_sec(3);              // with the battery reads this will be over 3 seconds
+            PHONE_ON_OFF_HIZ;           // return the pin to hi-z by setting 3.5 high
+            wait_a_sec(4);
+        }
+        return (YES);
     }
-    // actually turn on the phone
-    while (PHONE_IS_OFF)            // While the power monitor indicator bit is off
-    {   PHONE_ON_OFF_REQUEST;       // switch the phone power on/off by driving the pin low by setting P3.5 low
-        //force_shut_down = (readBattery() < SHUT_OFF_LEVEL) ;    // if the battery is low, set a flag to shut down after uploading data
-        wait_a_sec(3);              // with the battery reads this will be over 3 seconds
-        PHONE_ON_OFF_HIZ;           // return the pin to hi-z by setting 3.5 high
-        wait_a_sec(4);
-    }
+    return (NO);
 }
 
 
@@ -2951,7 +3042,7 @@ void adxl_power_cycle(void)
     p4save[0] = P4OUT;  // Port 4 Port Select Register 1
     p4save[1] = P4SEL1; // Port 4 Direction Register
     p4save[2] = P4DIR;  // Port 4 Resistor Enable Register */
-    // Stop sending power to any of the SPI pins by setting the appropriate pins low on P2
+    // Stop sending power to any of the SPI pins by setting the appropriate pins low on P2 and P4
     // The ADXL chip can only be reset if there is no voltage on ANY pin.
     P2OUT &= ~(BIT3|BIT4|BIT5|BIT6);   // set the output low for all the ADXL SPI pins
     P4OUT &= ~(BIT0|BIT1);             // zero the ADXL interrupt pins
@@ -2970,6 +3061,7 @@ void adxl_power_cycle(void)
     P2OUT = p2save[0];  // Port 2 Port Select Register 1 */
     P2SEL1 = p2save[1]; // Port 2 Direction Register */
     P2DIR = p2save[2];  // Port 2 Resistor Enable Register */
+    // restore Port 4 settings
     P4OUT = p4save[0];  // Port 4 Port Select Register 1 */
     P4SEL1 = p4save[1]; // Port 4 Direction Register */
     P4DIR = p4save[2];  // Port 4 Resistor Enable Register */
@@ -2978,7 +3070,7 @@ void adxl_power_cycle(void)
 }
 
 
-////////////// Command 0x01 -- turns the ADXL sensor ON
+////////////// Turn the ADXL sensor ON
     // This takes the sensor out of standby
     // and puts it in run mode.  Checks that it is actually on.
 void adxl_on (void)
@@ -2987,51 +3079,52 @@ void adxl_on (void)
 //    ADXL_UART_ON;
     for (x= 0; x <10; x++)  // try ten times
     {       // Prepare the SPI
-        reset_spi();                // confirm that SPI is enabled
+        reset_spi();          // confirm that SPI is enabled
         ADXL_SELECT;          // Select the chip by setting STE pin low (P2.3)
-            // Write the instruction to the ADXL to turn on
+        // Write the instruction to the ADXL to turn on
         while(ADXL_TX_NOT_READY);
         ADXL_TX_BUFF = ADXL_WRITE;     // Tell the ADXL to transmit the data in the FIFO stack
         while(ADXL_TX_NOT_READY);
         ADXL_TX_BUFF = 0x2D;           // send the address of the POWER_CTL byte
         while(ADXL_TX_NOT_READY);
         ADXL_TX_BUFF = PARAM_POWER_CTL_OFF | ADXL_ON;   // send the instructions for the POWER_CTL byte to turn on
-        while(ADXL_BUSY);            // wait for it to finish transmitting
-            // Reset the SPI
-        ADXL_DESELECT;           // deselect
-        wait(1);
-        ADXL_SELECT;          // Select the chip by setting STE pin low (P2.3)
-            // Confirm that the ADXL is on
+        while(ADXL_BUSY);              // wait for it to finish transmitting
+        // Reset the SPI
+        ADXL_DESELECT;          // deselect
+        wait(1);                // wait a msec
+        ADXL_SELECT;            // Select the chip by setting STE pin low (P2.3)
+        // Confirm that the ADXL is on
         while(ADXL_TX_NOT_READY);
-        ADXL_TX_BUFF = ADXL_READ;          // Tell the ADXL to transmit the data in a register
+        ADXL_TX_BUFF = ADXL_READ;   // Tell the ADXL to transmit the data in a register
         while(ADXL_TX_NOT_READY);
-        ADXL_TX_BUFF =  0x2D;              // send the address of the POWER_CTL byte
+        ADXL_TX_BUFF =  0x2D;       // send the address of the POWER_CTL byte
         while(ADXL_TX_NOT_READY);
-        ADXL_TX_BUFF =  0xFF;              // send a dummy byte to receive a byte
+        ADXL_TX_BUFF =  0xFF;       // send a dummy byte to receive a byte
         while(ADXL_BUSY);
-        test_byte = UCA1RXBUF;          // read what came in
-        ADXL_DESELECT;           // deselect
+        test_byte = UCA1RXBUF;      // read what came in
+        ADXL_DESELECT;              // deselect
         if (test_byte == PARAM_POWER_CTL_OFF | ADXL_ON) return;
-    }    // Time out after ten tries and report a problem with the sensor
+    }   // Time out after ten tries and report a problem with the sensor
     error_code = TIMEOUT_ERROR;
 }
 
 
-////////////// Command 0x02 -- RESET the ADXL sensor
+////////////// RESET the ADXL sensor
     // Software and hardware reset of the ADXL sensor
     // and puts the sensor in standby mode.  It still needs to be turned on using adxl_on().
     // returns an error code of 1 if the sensor does not turn on after 5 tries
 char adxl_reset(void)
-{   unsigned char reset_tries = 5;
+{
+    unsigned char reset_tries = 5;
     unsigned char ADXL_not_operational = TRUE;
     unsigned char test_byte = 0;
-    unsigned char x;                // general purpose counter
-    error_code = NO_ERROR;          // reset any previous error code
+    unsigned char x;            // general purpose counter
+    error_code = NO_ERROR;      // reset any previous error code
     while ( (ADXL_not_operational) && (reset_tries))    // keep resetting until things look good
     {  // TODO //  timing out.
-        while (ADXL_BUSY);               // check to see if any other device is using the SPI line.
-        adxl_power_cycle();                     // Turn off power to the ADXL and reset it
-        reset_spi();                    // confirm that SPI is enabled
+        while (ADXL_BUSY);      // check to see if any other device is using the SPI line.
+        adxl_power_cycle();     // Turn off power to the ADXL and reset it
+        reset_spi();            // confirm that SPI is enabled
                     // do a software reset of the ADXL sensor
                     // ADXL SOFT RESET REGISTER Address: 0x1F, Name: SOFT_RESET
                     //  Writing Code 0x52 (representing the letter, R, in ASCII or
@@ -3091,17 +3184,8 @@ char adxl_reset(void)
 }
 
 
-////////////// Command 0x03 -- Put the MSP430 TO SLEEP
-    // Puts the microprocessor in a very low power mode and wakes it up
-    // if it gets an interrupt from the ADXL sensor or the master board.
-    // If the ADXL sensor has been turned off, then only an interrupt
-    // from the master board on pin 3.3 or a power reset will wake it up
-void msp2sleep(void)
-{
-    __bis_SR_register(LPM4_bits + GIE);         // Enter low power mode until an interrupt wakes up the microprocessor
-}
 
-//REWRITE
+//TODO//REWRITE
 ////////////// Command 0x04 -- CALIBRATE
     // Stores calibration data sent by the comm tower
     // Most of this process is controlled by the set-up board:
@@ -3128,7 +3212,7 @@ unsigned char calibrate(void)
 
 
 
-// REWRITE
+//TODO// REWRITE
 ////////////// Command 0x06 -- Load NEW PARAMTERS
     // Downloads new parameters from comm tower and stores them
     // This includes: ADXL register settings
@@ -3186,7 +3270,7 @@ void set_new_parameters(void)
     // erase all data and resets the counts
 
 
-//REWRITE
+//TODO//REWRITE
 ////////////// Command 0x09 -- SEND LAST RECORD
     // sends the most recent record created (the current rec_count)
 void send_last_record(void)
@@ -3197,7 +3281,7 @@ send_a_record(rec_count);    // send the data
 
 
 
-// REWRITE (eventually)
+// TODO //REWRITE (eventually)
 ////////////// Command 0x0B -- MANUAL OPERATION
     // Manually reads or writes directly with the ADXL sensor without interpretation
     // Parameters for ADXL affect the result
@@ -3266,7 +3350,7 @@ void manual_operation(void)
     }
 }
 
-//REWRITE
+//TODO//REWRITE
 ////////////// Command 0x0C -- Stream data
     // Sends out sensor data as soon as it is read off the ADXL FIFO stack
     // Parameters for ADXL affect how data is streamed and should be set before calling this routine.
@@ -3289,7 +3373,7 @@ void check_id(void)
 {   transfer_string(nest_id, NEST_ID_BYTES, SEND);
 }
 
-// REWRITE
+// TODO// REWRITE
 ////////////// Command 0x0E -- SEND PARAMETERS
     // Uploads current parameters and counts  to comm tower
     // The send_string rountine receives two more bytes,
@@ -3301,27 +3385,6 @@ void send_parameters(void)
 {   transfer_string(parameters, PARAM_BYTES, SEND);
 }
 
-
-// LIKELY NO LONGER NEEDED
-////////////// Command 0x0F -- SEND a PROGRESS REPORT (error_code)
-    // Sends a one byte code that explains the reason for status of the smart sensor
-    // The report is two bytes.  The first one is the last command sent, and
-    // the second is the last status/error code.
-    // All codes less than 0x80 are not errors.
-    // 0x00 = No interrupt was generated -- operation in progress
-    // 0x01 = INT1 generated an interrupt
-    // 0x02 = INT2 generated an interrupt
-    // 0x04 = operation completed successfully, data ready to report
-    // 0x08 = operation completed successfully, no data to report
-    // 0x10 = normal start-up
-    // 0x20 = command received, operation underway, communication over
-    // >= 0x80 = an error condition exists.  The error code is returned:
-    // 0x81 = Sensor Start up failure (timed out)
-    // 0x82 = Unknown command received
-    // 0x84 = Bad Data received
-    // 0x88 = Data transmission timed out
-    // 0x90 = Parameters out of range
-    // 0xA0 = Unknown Start up error
 
 
 
@@ -3421,12 +3484,6 @@ void synch_event_clock(void)
     interval_count = 0;              // synch the interval
 }
 
-
-// send data out in small chunks that take more time than available during an interval
-void stop_data_run(void)    // stops collecting data
-{
-return;
-}
 
 
 // sends out any data found on the device after a restart
@@ -3545,29 +3602,31 @@ unsigned char get_registered(void)
 unsigned char register_device(void)
 {  unsigned char slot_count;    // a counter to find an unused slot
     for (slot_count = 2; ((slot_count < SENSOR_SLOTS) && (sensor_slot[slot_count] > 0)); slot_count++); // check all the slots
-    if ( (slot_count < SENSOR_SLOTS)              // if there are no available slots, don't do anything
+    if ( (slot_count < SENSOR_SLOTS)                             // if there are no available slots, don't do anything
         && (tx_rx_checked(EMPTY_TIME_SLOT, REQUEST_TIME_SLOT)) ) // let the devices know a slot is available
-    {   if (tx_rx_checked(SEND_ID, IDENTIFICATION))              // if a device wants the slot, ask sensor to send the sensor_ID
-        {               //make sure the data isn't too big for the array
-            if (received_datalength > NEST_ID_BYTES) received_datalength = NEST_ID_BYTES;
-            else        // save the serial number.  Slot_count will be the first empty slot
-            {   move_string(coax_buffer, 0, received_datalength, sensor_ids[slot_count], 0);
+    {   // if a device wants the slot, ask sensor to send the sensor_ID
+        if (tx_rx_checked(SEND_ID, IDENTIFICATION))
+        {   //make sure the data isn't too big for the array
+            if (received_datalength == SERIAL_ID_LEN)
+            {   // save the serial number.  Slot_count will be the first empty slot
+                move_string(coax_buffer, 0, received_datalength, sensor_ids[slot_count], 0);
                 if  (coax_long_message(REGISTRATION, slot_count, 0, " ", 1 )) // if the sensor received the info
-                {   unit_talking_to = slot_count;       // try talking directly to the new unit
+                {
+                    unit_talking_to = slot_count;       // try talking directly to the new unit
                     if (rx_checked(REGISTERED))         // check for success
-                    {   sensor_slot[slot_count] = YES;  // the success of registration is stored
+                    {
+                        sensor_slot[slot_count] = YES;  // the success of registration is stored
                         sensor_status[slot_count] = RECENTLY_CONNECTED; //This is used for census reporting
                         device_count++;                                 // increment the number of devices
                         return(YES);                                    // registration was successful
                     }
-                    else sensor_slot[slot_count] = NO;   // the failure of registration is stored and returned
                 }
             }
         }
         return (NO);    // something went wrong so the error is not cleared
-    }
-    tx_error = NO;      // an timeout error means that nobody tried to register so the error is cleared
-    return (NO);
+    }                   // an timeout error means that nobody tried to register so the error is cleared
+    if (tx_error == TIMEOUT_ERROR) tx_error = NO;
+    return (NO);        // nobody tried to register or all the slots are full
 }
 
 
@@ -3905,7 +3964,8 @@ void common_startup(void)
 // sends commands to the smart sensor and controls reporting via
 // Janus Plug-in terminus boards
 void master(void)
-{ unsigned char wait_to_register_count=0;
+{ unsigned char census_report_wait=0;
+  unsigned char recharge_delay = 0;
     master_settings();              // I/O settings for master board
     common_startup();               // Configuration settings common to both MASTER and SLAVE
     COAX_POWER_DISABLE;             // Turn off power to the sensors.  This is to insure that they didn't
@@ -3916,16 +3976,19 @@ void master(void)
     PHONE_ON_OFF_REQUEST;           // Set the phone's on/off pin to low (Turns off LED in prototype)
     PHONE_RESET_REQUEST;            // Set the phone reset pin to low
     phone_uart_off();               // start with the phone UART deactivated.
-
-    // Check for sufficient battery power to start up
-    // SHUT_OFF_LEVEL should be sufficient to power up the uP, but not enough for a 2maH phone call.
-//    while ((battery_level = readBattery()) < START_UP_LEVEL)
-//    {   wait_a_sec(300);                 // 5 minutes in the sun (sleeping for 300 seconds) should be enough to get going.
-//        watchdog_reset;
-//    }
-
-    //    blink LEDs for half a second to indicate startup.
     waiting = NO;
+    // Check for sufficient battery power to start up
+    while ( read_battery() < START_UP_LEVEL)
+    {   // START_OFF_LEVEL should be sufficient to power up the uP,
+        // but might not be enough for a 2maH phone call.
+        for (recharge_delay = 50; recharge_delay; recharge_delay--)
+        {   // 5 minutes in the sun (sleeping for 300 seconds) should be enough to get going.
+            wait_a_sec(6);
+            watchdog_reset;
+            blink_green(1);          // indicate that we're charging up
+        }
+    }
+    //    blink LEDs for half a second to indicate startup.
     RED_LED_ON;
     GREEN_LED_ON;
     wait(512);                      // wait a half second
@@ -3946,9 +4009,9 @@ void master(void)
     {
         ENTER_LOW_POWER_MODE_3;     // wait until the next 1/8 sec clock interval
         coax_reset();               // get rid of any UART garbage
-        if (interval_count == 0)                // interval zero is always just for resynching
+        if (interval_count == 0)            // interval zero is always just for resynching
         {
-            unit_talking_to = ALL_UNITS;      // everyone synchs their clock
+            unit_talking_to = ALL_UNITS;    // everyone synchs their clock
             if (coax_short_message(SYNCH) ) //send the message
                 blink(1);                   // blink every 6 seconds
             GREEN_LED_OFF;
@@ -3956,65 +4019,79 @@ void master(void)
             // Interval one is used for commands going to all sensors
             // because they are all already listening and synched.
         }
-        else if (interval_count == 1)   // this is the time slot for finding newly connected sensors (one per cycle)
-        {
-            unit_talking_to = ALL_UNITS;
-            if (new_census)             // if there was any change to the list of devices connected
+        else if (interval_count == 1)       // this is the time slot for finding newly connected sensors (one per cycle)
+        {   // Reports new connections after there is no further response
+            // All phone communications are set up during this interval.  All the sensors are put into suspend mode,
+            // meaning that they listen for commands during interval one and don't disconnect if there isn't
+            // a handshake during their own interval. The sensors all upload data during the 6 second cycle, which is more than
+            // time to upload or download 64K of code or data (probably won't need close to that)
+            // All the sensors stop synching during interval 0 and listen during slot one to see which sensor will be activated.
+            // 10 sensors a minute can be processed.  Once the cell call is complete the master releases the suspend command
+            // during interval one with a global wake-up command.
+            // All devices report their data if any one of them is ready to report.  Therefore, the device that is set to report
+            // most frequently will determine the frequency at which all devices will report.
+            unit_talking_to = ALL_UNITS;    // tallking to all units
+            if (time_to_wakeup)             // check the flag set after phoning in that it is time to get the devices out of suspend mode
             {
-                coax_short_message(SUSPEND);    // tells the sensors that they should not expect a handshake
-                intervals_on = NO;              // no timing interrupts for now
-                phone_on();                     // turn on the phone
-                report_in();                    // update status logs
-                time_to_wakeup = YES;           // this flags that suspend is off.
-                intervals_on = YES;             // turn the timing interrupts back on
-                new_census = NO;                // clear the census flag
-                changed_device_count = 0;       // reset the counter of changed devices
-                wait_for_last_cycle();          // wait until the last interval
+                coax_short_message(WAKE_UP);// Send the WAKE_UP message to end suspend mode
+                time_to_wakeup = NO;        // reset the flag that got us here
             }
-            else if (data_ready)       // if any of the devices is ready to report data they all do
+            else if (recharge_delay)        // don't do anything that takes much power if the batteries are low
             {
-                coax_short_message(SUSPEND);    // suspend synching up and handshaking while reporting data
-                intervals_on = NO;              // no timing interupts for now
-                phone_on();                     // turn on the power supply for the phone and turn the phone on
-                phone_in(); // send in a report for each slave
-                            // wakes up the slaves with data one by one
-                            // uploads the data to the cloud
-                time_to_wakeup = YES;           // signal that we're done for the next time we are at interval one
-                intervals_on = YES;             // turn timing interrupts back on
-                data_ready = NO;                // clear the flag that data is ready for reporting
-                wait_for_last_cycle();          // wait until the last timing interval so that the next one is interval zero
+                recharge_delay--;           // wait 50 loops (5 minutes) before trying again
             }
-            else if (time_to_wakeup)    // check the flag set after phoning in that it is time to get the devices out of suspend mode
+            else if (new_census)            // if there was any change to the list of devices connected
             {
-                coax_short_message(WAKE_UP);    // Send the WAKE_UP message to end suspend mode
-                time_to_wakeup = NO;            // reset the flag that got us here
+                coax_short_message(SUSPEND);// tells the sensors that they should not expect a handshake
+                intervals_on = NO;          // no timing interrupts for now
+                if (phone_on())             // turn on the phone
+                {   // if there is enough voltage, the phone will turn on
+                    report_in();            // update status logs
+                    new_census = NO;        // clear the census flag
+                    changed_device_count = 0;  // reset the counter of changed devices
+                }
+                else
+                {   // if there wasn't enough voltage, the phone won't go on.
+                    recharge_delay = 50;    // wait 5+ minutes and see if the batteries have charged up
+                }   // in either case, we are done here.  Time to wake up.
+                time_to_wakeup = YES;       // this flags that suspend is off.
+                intervals_on = YES;         // turn the timing interrupts back on
+                wait_for_last_cycle();      // wait until the last interval
             }
-            else if (register_device()) // if no other flags were set, check to see if any new devices have been connected
+            else if (data_ready)            // if any of the devices is ready to report data they all do
             {
-                GREEN_LED_ON;                   // The green LED signifies that a device was connected
-                changed_device_count ++;        // Keep a count of how many devices have been changed
-                wait_to_register_count = 0;     // reset the counter to wait a while before reporting in the new census
+                coax_short_message(SUSPEND);// suspend synching up and handshaking while reporting data
+                intervals_on = NO;          // no timing interupts for now
+                if (phone_on())             // turn on the power supply for the phone and turn the phone on
+                {                           // if there is enough voltage the phone is on
+                    phone_in();             // wakes up the slaves with data one by one
+                                            // uploads a report for each slave to the cloud
+                    data_ready = NO;        // clear the flag that data is ready for reporting
+                }
+                else
+                {   // if there wasn't enough voltage, the phone won't go on.
+                    recharge_delay = 50;    // wait 5+ minutes and see if the batteries have charged up
+                }   // in either case, we are done here.  Time to wake up.
+                time_to_wakeup = YES;       // signal that we're done for the next time we are at interval one
+                intervals_on = YES;         // turn timing interrupts back on
+                wait_for_last_cycle();      // wait until the last timing interval so that the next one is interval zero
             }
-            else if (wait_to_register_count < REGISTRATION_WAIT)    // If it is not yet time to report the new census
-                wait_to_register_count++;       // wait some more before reporting
+            else if (register_device())     // if we are awake, check to see if any new devices have been connected
+            {
+                GREEN_LED_ON;               // The green LED signifies that a device was connected
+                changed_device_count ++;    // Keep a count of how many devices have been changed
+                census_report_wait = 0;     // reset the counter to wait a while before reporting in the new census
+            }
+            else if (census_report_wait < REGISTRATION_WAIT)    // If it is not yet time to report the new census
+                census_report_wait++;       // wait some more before reporting
             else if (changed_device_count)      // if all else fails, and there are device changes, then enough time has elapsed
                 new_census = YES;               // flag that we are ready to report status changes
-
-  // Reports new connections after there is no further response
-  // All phone communications are set up during this interval.  All the sensors are put into suspend mode,
-  // meaning that they listen for commands during interval one and don't disconnect if there isn't
-  // a handshake during their own interval. The sensors all upload data during the 6 second cycle, which is more than
-  // time to upload or download 64K of code or data (probably won't need close to that)
-  // All the sensors stop synching during interval 0 and listen during slot one to see which sensor will be activated.
-  // 10 sensors a minute can be processed.  Once the cell call is complete the master releases the suspend command
-  // during interval one with a global wake-up command.
-  // All devices report their data if any one of them is ready to report.  Therefore, the device that is set to report
-  // most frequently will determine the frequency at which all devices will report.
-
         }
-        else if (device_count)          // For all intervals greater than one, if devices are connectd
-        {                               // this is the default for all connected sensors.  It checks that they are still connected
-                                        // and deregisters them if they do not respond to a status inquiry
+        else if (device_count)
+        {   // For all intervals greater than one, maintain a census of connected devices.
+            // Each device has its own time slot, assigned during registration.
+            // During the slot the device is pinged to check that they are still connected
+            // and are deregistered after 3 attempts without a response to a status inquiry
             if (sensor_slot[interval_count] == YES)     // only check on an slot if a slave has been registered there (= 1)
             {
                 unit_talking_to = interval_count;       // set the recipient to match the interval
@@ -4029,19 +4106,20 @@ void master(void)
                 {   if (++ping_failures[unit_talking_to] >= PING_FAILURES_MAX)
                     {   // disconnect if the handshake fails PING_FAILURE_MAX times
                         sensor_slot[unit_talking_to]= NO; // deregisiter whatever sensor was there
-                        if (sensor_status[unit_talking_to] == NO_UNREPORTED_CHANGE) // ignore quick connects and disconnects
+                        if (sensor_status[unit_talking_to] == NO_UNREPORTED_CHANGE) // only report unreported disconnects
                         {
                             sensor_status[unit_talking_to] = RECENTLY_DISCONNECTED; // record the status
                             changed_device_count ++;        // Keep a count of how many devices have been changed
                         }
                         else if (sensor_status[unit_talking_to] == RECENTLY_CONNECTED)
-                        {
-                            sensor_status[unit_talking_to] = NO_UNREPORTED_CHANGE; // record the status
+                        {   // ignore unreported connections followed by quick disconnections
+                            sensor_status[unit_talking_to] = NO_UNREPORTED_CHANGE; // nothing to report
+                            changed_device_count --;        // one less change
                         }
                         device_count--;                 // one less device
                         tx_error = NO_ERROR;            // if there was no sensor a timeout error is expected
                         RED_LED_ON;                     // long red led blink indicates disconnection
-                        wait_to_register_count = 0;     // reset the counter to wait a while before reporting in the new census
+                        census_report_wait = 0;     // reset the counter to wait a while before reporting in the new census
                     }
                  }
             }
@@ -4061,7 +4139,7 @@ void master(void)
 void main(void)
 { unsigned char temp = 0;
     Grace_init();       // Activate Grace-generated configuration
-//    cs_setup();
+//    cs_setup();       // not quite working yet (Jim Washer's code)
     if (not_slave)
         master() ;       // The routine for the master
 
@@ -4074,7 +4152,8 @@ void main(void)
         STOP_INTERVAL_TIMER;            // stop the timer for now
         wait(512);                      // wait 1/2 a second
         generate_random(12);            // creates a random number between 0 and 8191
-    //    if (!not_first_start) initialize_slave();
+        // if (!not_first_start) initialize_slave();
+        // todo                         // try to recover from power glitches
         initialize_slave();             // this may need to be condtional
         slave_registered = NO;          // flag that slave is not registered
         suspended = NO;                 // start out in not suspended mode -- master decides when to suspend
@@ -4133,34 +4212,37 @@ void main(void)
                         synch_slave();                      // and get in synch with what is happening
                     }
                     break;
-    // interval one is for adjusting the clock, registering the sensor and housekeeping
-    // Also controls when to report data and suspend handshaking
-                case 1:           // adjust the interval timer back to a full 125 msec
+
+                    // interval one is for adjusting the clock, registering the sensor and housekeeping
+                    // Also controls when to report data and suspend handshaking
+                case 1:           // first, readjust the interval timer back to a full 125 msec
                     STOP_INTERVAL_TIMER;    // stop the timer while adjusting
                     ZERO_TIMER;             // Start the timer counter at zero again
                     NORMAL_INTERVAL;        // reset to normal interval length after a synch interval
                     START_INTERVAL_TIMER;   // start or restart the timer counter
                     watchdog_reset();       // this slot can be used for other housekeeping
                     interval_count = 1;     // was there an interrupt generated by resetting the clock?
+
                     // This is also be the interval for registerring
-                    if (!slave_registered)             // if slave_registered is zero then no slot has been assigned
+                    if (!slave_registered)  // if slave_registered is zero then no slot has been assigned
                     {
-                        if ( (receive_message())          // and there's no error receiving the message
-                            && (received_command == EMPTY_TIME_SLOT))    // and the message says a slot is available
+                        if ( (receive_message())                        // if there's no error receiving the message
+                            && (received_command == EMPTY_TIME_SLOT))   // and the message says a slot is available
                         {
                             if (get_registered())           // register the sensor and assign it an interval
                             {
-                                status = READY;             // if the interval is non-zero we are connected and ready
+                                status = READY;             // if there was no error we are connected and ready
                                 slave_registered = YES;
                             }
                         }
                     }
-                    // and for going in and out of suspend mode during data reporting
-                    else if ( (receive_message())       // only if registered.
-                        && (received_command == SUSPEND) )
+                    // if we are registerred  this interval is for group messages,
+                    // like going in and out of suspend and data requests
+                    else if ( (receive_message())           // if a message is received
+                        && (received_command == SUSPEND) )  // commanding us to suspend handshaking
                     {
-                        suspended = YES;            // go into suspend mode if commanded
-                        wait_for_last_cycle();      // wait until the last interval
+                        suspended = YES;            // go into suspend mode
+                        wait_for_last_cycle();      // wait until the last interval while the phone is starting up
                     }
                     break;
 
@@ -4168,13 +4250,14 @@ void main(void)
                     // This only happens during the registered interval if not suspended
                     if (interval_count == this_unit)
                     {
-                        if (receive_message())              // receive a message and there was no error
+                        if (receive_message())              // if a message was received and there was no error
                         {
                             slave_routines();               // process the message
                             ping_failures[0] = 0;           // reset the failure counter, all is good
                         }
                         else
-                        {   if (++ping_failures[0] >= PING_FAILURES_MAX)
+                        {   // if there was an error the expected reply was not received
+                            if (++ping_failures[0] >= PING_FAILURES_MAX)    // count failures for each slot
                             {   // disconnect if the handshake fails PING_FAILURE_MAX times
                                 slave_registered = NO;      // otherwise give up and re-register
                                 this_unit = DEFAULT_SLAVE;  // un registered units are all 0xFF
@@ -4188,12 +4271,12 @@ void main(void)
             // Data is continuously read, even when old data is being sent over the COAX line
             if ( !(interval_count & 0x07) )    // every second
             {
-                rec_secs++;              // seconds this record has been counting
+                rec_secs++;             // seconds this record has been counting
             }
             if (adxl_reading_on)
-                adxl_fifo_read();    //This reads the buffer of the ADXL fifo buffer
+                adxl_fifo_read();       //This reads the buffer of the ADXL fifo buffer
             if (integrating_on)
-                integrate_data();   // for now just use the integration algorithm
+                integrate_data();       // for now just use the integration algorithm
             if (bin_process_on)
                 process_bin_data();
         }
